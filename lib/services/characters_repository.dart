@@ -17,7 +17,6 @@ class CharactersRepository {
         _auth = auth ?? FirebaseAuth.instance,
         _tenant = tenant ?? GameContextService.instance.currentTenant;
 
-  static const _charactersCollection = 'characters';
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
