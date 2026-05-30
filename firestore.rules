@@ -1,0 +1,305 @@
+rules_version = '2';
+
+// Tenants: games/{instanceId}/events/{eventSlug}/...
+// Membership mirror: users/{userId}/gameMemberships/{tenantKey}
+// Configured LARPs: users/{userId}.configuredLarps (tenantKey -> fields)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(ownerId) {
+      return isAuthenticated() && request.auth.uid == ownerId;
+    }
+
+    function membershipPath(instanceId, eventSlug) {
+      return /databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug)/members/$(request.auth.uid);
+    }
+
+    function isGameMember(instanceId, eventSlug) {
+      return isAuthenticated() && exists(membershipPath(instanceId, eventSlug));
+    }
+
+    function gameMemberRole(instanceId, eventSlug) {
+      let p = membershipPath(instanceId, eventSlug);
+      return exists(p) ? get(p).data.role : '';
+    }
+
+    function canConfigureGameRules(instanceId, eventSlug) {
+      return isAuthenticated()
+        && isGameMember(instanceId, eventSlug)
+        && (gameMemberRole(instanceId, eventSlug) == 'owner'
+            || gameMemberRole(instanceId, eventSlug) == 'superAdmin');
+    }
+
+    function tenantKeyMatches(instanceId, eventSlug, key) {
+      return key == instanceId + '::' + eventSlug;
+    }
+
+    // --- User profile ---
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /gameMemberships/{membershipId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated()
+          && request.auth.uid == userId
+          && request.resource.data.role == 'player'
+          && request.resource.data.instanceId is string
+          && request.resource.data.eventSlug is string
+          && tenantKeyMatches(
+            request.resource.data.instanceId,
+            request.resource.data.eventSlug,
+            membershipId
+          );
+        allow update: if isAuthenticated()
+          && request.auth.uid == userId
+          && request.resource.data.role == 'player'
+          && resource.data.role == 'player'
+          && request.resource.data.instanceId == resource.data.instanceId
+          && request.resource.data.eventSlug == resource.data.eventSlug
+          && tenantKeyMatches(
+            resource.data.instanceId,
+            resource.data.eventSlug,
+            membershipId
+          );
+        allow update: if isAuthenticated()
+          && request.resource.data.instanceId is string
+          && request.resource.data.eventSlug is string
+          && canConfigureGameRules(
+            request.resource.data.instanceId,
+            request.resource.data.eventSlug
+          );
+        allow delete: if false;
+      }
+
+      match /activityEvents/{eventId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /larps/{larpId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // --- Global LARP catalog ---
+    match /larpRegistry/{instanceId} {
+      match /events/{eventSlug} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+          && request.resource.data.instanceId == instanceId
+          && request.resource.data.eventSlug == eventSlug
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.organizerAccessConfigured == true;
+        allow update: if isAuthenticated()
+          && resource.data.instanceId == instanceId
+          && resource.data.eventSlug == eventSlug
+          && request.resource.data.instanceId == instanceId
+          && request.resource.data.eventSlug == eventSlug
+          && (
+            resource.data.createdByUid == request.auth.uid
+            || canConfigureGameRules(instanceId, eventSlug)
+          );
+        allow delete: if false;
+      }
+    }
+
+    // --- LarpManager instances ---
+    match /games/{instanceId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && !exists(/databases/$(database)/documents/games/$(instanceId));
+      allow update: if isAuthenticated();
+      allow delete: if false;
+
+      match /events/{eventSlug} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+          && !exists(/databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug));
+        allow update: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+        allow delete: if false;
+
+        match /members/{memberId} {
+          allow read: if isAuthenticated() && request.auth.uid == memberId;
+          allow read: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+          allow create: if isAuthenticated()
+            && request.auth.uid == memberId
+            && memberId == request.auth.uid
+            && request.resource.data.role == 'player'
+            && request.resource.data.instanceId == instanceId
+            && request.resource.data.eventSlug == eventSlug;
+          allow update: if isAuthenticated()
+            && request.auth.uid == memberId
+            && request.resource.data.role == 'player'
+            && resource.data.role == 'player'
+            && request.resource.data.instanceId == instanceId
+            && request.resource.data.eventSlug == eventSlug;
+          allow update: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+          allow delete: if false;
+        }
+
+        match /rules/{ruleId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+        }
+
+        match /characters/{characterId} {
+          allow create: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && request.resource.data.ownerId == request.auth.uid;
+          allow read, update, delete: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && isOwner(resource.data.ownerId);
+
+          match /status/{document=**} {
+            allow read, write: if isAuthenticated()
+              && isGameMember(instanceId, eventSlug)
+              && isOwner(
+                get(/databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug)/characters/$(characterId)).data.ownerId
+              );
+          }
+          match /stats/{statId} {
+            allow read, write: if isAuthenticated()
+              && isGameMember(instanceId, eventSlug)
+              && isOwner(
+                get(/databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug)/characters/$(characterId)).data.ownerId
+              );
+          }
+          match /events/{eventId} {
+            allow read: if isAuthenticated()
+              && isGameMember(instanceId, eventSlug)
+              && isOwner(
+                get(/databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug)/characters/$(characterId)).data.ownerId
+              );
+            allow write: if false;
+          }
+        }
+
+        match /characterShortIdLookup/{shortId} {
+          allow create: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && request.resource.data.ownerId == request.auth.uid;
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow update, delete: if false;
+        }
+
+        match /playerActivityEvents/{eventId} {
+          allow create: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && request.resource.data.playerId == request.auth.uid;
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow update, delete: if false;
+        }
+
+        match /activeEvents/{eventId} {
+          allow create: if false;
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow update, delete: if false;
+        }
+
+        match /deathInterventionClaims/{activityEventId} {
+          allow create: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && request.resource.data.medicPlayerId == request.auth.uid;
+          allow update: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && resource.data.medicPlayerId == request.auth.uid;
+          allow read: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && (resource.data.fallenPlayerId == request.auth.uid
+                || resource.data.medicPlayerId == request.auth.uid);
+          allow delete: if false;
+        }
+
+        match /larpManagerMirrorMeta/summary {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+        match /larpManagerMirrorChars/{characterUuid} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+
+        match /larpManagerSyncSettings/{docId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+        }
+
+        match /larpManagerIntegration/{docId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+
+        // LarpManager registration mirror (written by Cloud Functions only).
+        match /larpManagerRegistrationsMeta/{docId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+        match /larpManagerRegistrations/{registrationId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+        match /larpManagerOrganizersMeta/{docId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+        match /larpManagerOrganizers/{organizerId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if false;
+        }
+      }
+    }
+
+    match /events/{eventId} {
+      allow create: if isAuthenticated()
+        && request.resource.data.organizerId == request.auth.uid;
+      allow read: if isAuthenticated()
+        && (resource.data.visibility == 'public'
+            || resource.data.organizerId == request.auth.uid
+            || request.auth.uid in resource.data.coOrganizerIds);
+      allow update, delete: if isAuthenticated()
+        && (resource.data.organizerId == request.auth.uid
+            || request.auth.uid in resource.data.coOrganizerIds);
+
+      match /registrations/{regId} {
+        allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+        allow read: if isAuthenticated();
+        allow update, delete: if isAuthenticated();
+      }
+      match /{subcollection=**} {
+        allow read, write: if isAuthenticated()
+          && (get(/databases/$(database)/documents/events/$(eventId)).data.organizerId == request.auth.uid
+              || request.auth.uid in get(/databases/$(database)/documents/events/$(eventId)).data.coOrganizerIds);
+      }
+    }
+
+    match /templates/{templateId} {
+      allow create: if isAuthenticated()
+        && request.resource.data.creatorId == request.auth.uid;
+      allow read: if isAuthenticated()
+        && (resource.data.visibility == 'public'
+            || resource.data.creatorId == request.auth.uid);
+      allow update, delete: if isOwner(resource.data.creatorId);
+
+      match /{subcollection=**} {
+        allow read, write: if isOwner(
+          get(/databases/$(database)/documents/templates/$(templateId)).data.creatorId
+        );
+      }
+    }
+
+    match /gameSystems/{gameSystemId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /itemTransfers/{transferId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+  }
+}

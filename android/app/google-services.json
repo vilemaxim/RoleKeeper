@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "843252671350",
+    "project_id": "rolekeeper-7ddcc",
+    "storage_bucket": "rolekeeper-7ddcc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:843252671350:android:d8c434e7296c81ce209057",
+        "android_client_info": {
+          "package_name": "com.rolekeeper.rolekeeper"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBku_Qn6fTvCyxpDCglOR1gcKHP8RntWhk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

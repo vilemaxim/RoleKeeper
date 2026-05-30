@@ -1,0 +1,35 @@
+---
+description: Flutter UI error handling via reportAppError
+globs: lib/**/*.dart
+alwaysApply: false
+---
+
+# Flutter error handling
+
+Use `reportAppError` from `lib/utils/error_reporting.dart` for any error shown to the user or caught in UI/service flows that represent a failure the user should know about.
+
+## Required pattern
+
+```dart
+import '../utils/error_reporting.dart';
+
+try {
+  // ...
+} catch (e, st) {
+  final report = reportAppError('ScreenName.operation', e, st);
+  // UI: SnackBar, banner, dialog, state field — use report.userMessage only
+}
+```
+
+- **Always** pass a stable `context` string: `ScreenOrClass.operation` (e.g. `CharactersScreen.sync`).
+- **Never** show raw `e.toString()`, `INTERNAL`, or Firebase `code` alone in UI.
+- Do **not** use deprecated `formatUserFacingError` / `logErrorToTerminal` alone — `reportAppError` logs raw detail to the terminal and returns the user message.
+
+## Known errors
+
+Add matchers in `error_reporting.dart` (and a test in `test/utils/error_reporting_test.dart`) when a new error type needs clearer copy. Unknown errors use the generic “contact your event administrator” message.
+
+## Exceptions
+
+- Intentional silent catches (`catch (_) {}`) for optional/non-critical paths (e.g. vibration unavailable) — no change required.
+- Re-throw or wrap for library boundaries only when the caller will call `reportAppError`.

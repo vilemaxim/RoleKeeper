@@ -1,0 +1,65 @@
+---
+description: TDD workflow enforcement for AI agents working the RoleKeeper task queue
+alwaysApply: true
+---
+
+# RoleKeeper TDD Agent Rules
+
+## On Session Start — MANDATORY FIRST STEP
+
+Before doing ANYTHING else, call the `get_current_task_state` tool.
+Read the returned state completely. Your role, task, and phase goal are defined there.
+Do not proceed until you have called this tool.
+
+## Phase Discipline
+
+You operate in strict phases. You may NOT skip a phase.
+
+| Phase | What you do | How you exit |
+|---|---|---|
+| CODER_TEST_CREATION | Write failing tests only. No implementation. | Call `success` when tests exist and fail |
+| CODER_IMPLEMENTATION | Make the tests pass. No other changes. | Call `success` when tests pass |
+| CODER_REFACTOR | Clean code only. Tests must still pass. | Call `success` when done |
+| DEBUG_ANALYSIS | Analyze only. No code changes. | Call `success` when you have a plan |
+| DEBUG_IMPLEMENTATION | Apply your fix. Verify it works. | Call `success` when fixed |
+| REVIEW_AUDIT | Read and assess only. ZERO code changes. | Call `success` (approve) or `failure` (reject) |
+| SECURITY_AUDIT | Read and assess only. ZERO code changes. | Call `success` (approve) or `failure` (reject) |
+| PERF_AUDIT | Read and assess only. ZERO code changes. | Call `success` (approve) or `failure` (reject) |
+| TEST_OR_LINTING_FAILED | Fix lint/test errors only. | Call `success` when clean |
+
+## Verification
+
+When you call `success` on a coding phase, the MCP server automatically runs:
+1. `scripts/lint.sh` — flutter analyze + ESLint
+2. `scripts/test.sh` — Flutter tests + Functions tests (against emulators)
+
+If verification fails, `success` is rejected and you are returned to `TEST_OR_LINTING_FAILED`.
+You cannot advance without passing verification. There is no override.
+
+## Stack Reference
+
+| Layer | Location | Lint | Test |
+|---|---|---|---|
+| Flutter (Dart) | `lib/` | `flutter analyze` | `flutter test` |
+| Functions (TypeScript) | `functions/src/` | ESLint | `node --test lib/` |
+| Firestore rules | `firestore.rules` | (reviewed manually) | (rules-unit-testing) |
+
+## Task File Format
+
+Tasks are markdown files in `docs/tasks/ready/` named `{NNN}-{role}.md`.
+Roles: `coder`, `reviewer`, `debugger`, `security`, `performance`.
+Sorted numerically — lower number = higher priority.
+
+## What You Must Not Do
+
+- Do not modify code during audit phases (REVIEW, SECURITY, PERF)
+- Do not call `success` and claim verification passed — the server checks independently
+- Do not commit or push to git — output the git commands for the human to run
+- Do not access production Firebase — use the local emulators (ports 8080, 9099, 5001, 9199)
+- Do not modify `tdd-mcp/` — that is infrastructure, not application code
+
+## Git Handoff
+
+When a task completes, the MCP server outputs exact git commands.
+Run them verbatim for the human. Do not modify branch names or commit messages.
+The human reviews the PR and merges — you do not merge.
