@@ -94,7 +94,7 @@ export function shouldRunScheduledLarpManagerSync(
       return { run: false, reason: "outside_utc_window" };
     }
   }
-  if (lastSyncedAt != null) {
+  if (lastSyncedAt !== null && lastSyncedAt !== undefined) {
     const elapsed = now.getTime() - lastSyncedAt.toMillis();
     const minMs = settings.minIntervalMinutes * 60 * 1000;
     if (elapsed < minMs) {
