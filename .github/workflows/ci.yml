@@ -6,9 +6,6 @@ on:
   push:
     branches: [main]
 
-env:
-  FLUTTER_HOME: /home/runner/flutter
-
 jobs:
   lint-and-test:
     name: Lint & Test
@@ -28,14 +25,13 @@ jobs:
       - name: Setup Flutter
         run: |
           git clone https://github.com/flutter/flutter.git --depth 1 --branch 3.38.2 /home/runner/flutter
-          echo "/home/runner/flutter/bin" >> $GITHUB_PATH
           /home/runner/flutter/bin/flutter --version
 
       - name: Setup Java (for Firebase emulators)
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "17"
+          java-version: "21"
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
@@ -61,11 +57,15 @@ jobs:
       - name: Flutter tests
         run: /home/runner/flutter/bin/flutter test --no-pub
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
       - name: Functions tests (with emulators)
         run: |
           firebase emulators:exec \
             --only auth,functions,firestore,storage \
             --project rolekeeper-7ddcc \
             "cd functions && FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 node --test lib/"
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
