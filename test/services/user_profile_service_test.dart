@@ -170,7 +170,7 @@ void main() {
     });
   });
 
-  group('UserProfileService.setActiveGameId', () {
+  group('UserProfileService.setActiveTenantKey', () {
     test('writes activeGameId on user doc', () async {
       final user = MockUser(uid: 'mark-1', email: 'm@b.com');
       final auth = MockFirebaseAuth(mockUser: user, signedIn: true);

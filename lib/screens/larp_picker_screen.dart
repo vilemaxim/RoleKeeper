@@ -45,7 +45,7 @@ class _LarpPickerScreenState extends State<LarpPickerScreen> {
   }
 
   Future<void> _finishAfterSelectingGame(String gameId) async {
-    await _profile.setActiveGameId(gameId);
+    await _profile.setActiveTenantKey(gameId);
     GameContextService.instance.selectGame(gameId);
     if (!mounted) return;
     if (widget.switchMode) {
