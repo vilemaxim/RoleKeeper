@@ -93,9 +93,6 @@ class UserProfileService {
     );
   }
 
-  @Deprecated('Use setActiveTenantKey')
-  Future<void> setActiveGameId(String tenantKey) => setActiveTenantKey(tenantKey);
-
   Future<void> upsertConfiguredLarp({
     required GameTenantRef tenant,
     required String displayName,

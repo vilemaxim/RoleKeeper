@@ -112,15 +112,23 @@ class _DeathCountConfirmScreenState extends State<DeathCountConfirmScreen> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ] else ...[
-                      ...characters.map((c) => RadioListTile<Character>(
-                            value: c,
-                            groupValue: _playtest ? null : _selectedCharacter,
-                            onChanged: _playtest
-                                ? null
-                                : (v) => setState(() => _selectedCharacter = v),
-                            title: Text(c.name),
-                            subtitle: Text('ID: ${c.shortId}'),
-                          )),
+                      RadioGroup<Character>(
+                        groupValue: _playtest ? null : _selectedCharacter,
+                        onChanged: (v) =>
+                            setState(() => _selectedCharacter = v),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final c in characters)
+                              RadioListTile<Character>(
+                                value: c,
+                                enabled: !_playtest,
+                                title: Text(c.name),
+                                subtitle: Text('ID: ${c.shortId}'),
+                              ),
+                          ],
+                        ),
+                      ),
                     ],
                     const SizedBox(height: 8),
                     CheckboxListTile(

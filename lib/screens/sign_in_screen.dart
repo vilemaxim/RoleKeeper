@@ -123,7 +123,7 @@ class _SignInScreenState extends State<SignInScreen> {
                             'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
                             width: 24,
                             height: 24,
-                            errorBuilder: (_, __, ___) =>
+                            errorBuilder: (_, _, _) =>
                                 const Icon(Icons.g_mobiledata, size: 24),
                           ),
                     label: Text(_isLoading ? 'Signing in…' : 'Sign in with Google'),
