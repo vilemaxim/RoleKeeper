@@ -23,12 +23,12 @@ jobs:
           cache-dependency-path: functions/package-lock.json
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.2"
-          channel: "stable"
-          dart-version: "3.10.0"
-          cache: false
+        run: |
+          git clone https://github.com/flutter/flutter.git --depth 1 --branch 3.38.2 $HOME/flutter
+          echo "$HOME/flutter/bin" >> $GITHUB_PATH
+
+      - name: Flutter version check
+        run: flutter --version
 
       - name: Setup Java (for Firebase emulators)
         uses: actions/setup-java@v4
@@ -47,7 +47,7 @@ jobs:
         run: flutter pub get
 
       - name: Flutter analyze
-        run: flutter analyze --no-pub --no-fatal-warnings
+        run: flutter analyze --no-pub
 
       - name: Functions ESLint
         run: npx eslint src/ --max-warnings 0

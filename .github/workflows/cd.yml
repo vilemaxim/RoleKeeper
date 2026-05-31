@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # Required for Workload Identity Federation
+      id-token: write
 
     steps:
       - name: Checkout
@@ -24,12 +24,9 @@ jobs:
           cache-dependency-path: functions/package-lock.json
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.2"
-          channel: "stable"
-          dart-version: "3.10.0"
-          cache: false
+        run: |
+          git clone https://github.com/flutter/flutter.git --depth 1 --branch 3.38.2 $HOME/flutter
+          echo "$HOME/flutter/bin" >> $GITHUB_PATH
 
       - name: Authenticate to Google Cloud (Workload Identity Federation)
         uses: google-github-actions/auth@v2
