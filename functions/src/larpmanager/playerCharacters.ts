@@ -62,7 +62,7 @@ export function resolveCharactersByNames(
 
 /** Deterministic 3-char short ID for LM-synced characters. */
 export function shortIdForLmCharacter(ch: ResolvedLmCharacter): string {
-  if (ch.number !== null && Number.isFinite(ch.number)) {
+  if (ch.number != null && Number.isFinite(ch.number)) {
     const n = Math.abs(Math.trunc(ch.number));
     if (n >= 1000) return String(n % 1000).padStart(3, "0");
     return String(n).padStart(3, "0").slice(-3);
