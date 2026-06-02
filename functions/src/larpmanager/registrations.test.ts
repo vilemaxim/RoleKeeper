@@ -41,6 +41,22 @@ test("parseRegistrationRowsFromCsv reads Characters column", () => {
   assert.deepEqual(rows[1]?.characterNames, ["Hero One", "Sidekick"]);
 });
 
+// Regression for task 001 root cause: real LarpManager registration exports may
+// label the column "Character" (singular) depending on event feature config /
+// localization. With the strict `=== "characters"` check, every row got
+// `characterNames: []`, which short-circuited `syncPlayerCharactersForUser`
+// into the "create a character on LarpManager" branch even when the player
+// already had a character assigned in LM.
+test("parseRegistrationRowsFromCsv accepts singular 'Character' header", () => {
+  const csv = [
+    "Name,Email,Character",
+    "Alice,alice@example.com,Alice Hero",
+  ].join("\n");
+  const rows = parseRegistrationRowsFromCsv(csv);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0]?.characterNames, ["Alice Hero"]);
+});
+
 test("registrationDocIdForEmail is stable", () => {
   const a = registrationDocIdForEmail("User@Example.COM");
   const b = registrationDocIdForEmail("user@example.com");

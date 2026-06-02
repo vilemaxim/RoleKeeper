@@ -90,9 +90,14 @@ export function parseRegistrationRowsFromCsv(csv: string): RegistrationRow[] {
       'Registration export CSV has no "Email" column — check LarpManager export permissions'
     );
   }
-  const charIdx = headers.findIndex(
-    (h) => h.trim().toLowerCase() === "characters"
-  );
+  // Accept both plural ("Characters") and singular ("Character") — LarpManager
+  // exports use either depending on the event's feature configuration. A strict
+  // `=== "characters"` match silently dropped every row's character list when
+  // an event was configured with the singular form (task 001 root cause).
+  const charIdx = headers.findIndex((h) => {
+    const norm = h.trim().toLowerCase();
+    return norm === "characters" || norm === "character";
+  });
 
   const rows: RegistrationRow[] = [];
   for (let i = 1; i < lines.length; i++) {
