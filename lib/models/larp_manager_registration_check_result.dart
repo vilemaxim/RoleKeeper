@@ -13,6 +13,9 @@ class LarpManagerRegistrationCheckResult {
     this.characterCount = 0,
     this.characterCreatePageUrl,
     this.characterMessage,
+    this.organizerSyncError,
+    this.registrationSyncError,
+    this.characterSyncError,
   });
 
   final bool registered;
@@ -27,6 +30,23 @@ class LarpManagerRegistrationCheckResult {
   final int characterCount;
   final String? characterCreatePageUrl;
   final String? characterMessage;
+
+  /// Non-null short user-safe message when the organizer-roles sync degraded
+  /// (e.g. LarpManager `manage/roles/` fetch failed). The callable still
+  /// returned useful data from cache.
+  final String? organizerSyncError;
+
+  /// Non-null short user-safe message when the registrations sync degraded.
+  final String? registrationSyncError;
+
+  /// Non-null short user-safe message when the character sync degraded.
+  final String? characterSyncError;
+
+  /// True when at least one of the three `*SyncError` fields is non-null.
+  bool get hasAnySyncError =>
+      organizerSyncError != null ||
+      registrationSyncError != null ||
+      characterSyncError != null;
 
   factory LarpManagerRegistrationCheckResult.fromCallable(
     Map<String, dynamic> data,
@@ -44,6 +64,9 @@ class LarpManagerRegistrationCheckResult {
       characterCount: (data['characterCount'] as num?)?.toInt() ?? 0,
       characterCreatePageUrl: data['characterCreatePageUrl'] as String?,
       characterMessage: data['characterMessage'] as String?,
+      organizerSyncError: data['organizerSyncError'] as String?,
+      registrationSyncError: data['registrationSyncError'] as String?,
+      characterSyncError: data['characterSyncError'] as String?,
     );
   }
 }
