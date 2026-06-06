@@ -69,6 +69,45 @@ export function findOrganizerRoleUuidFromRolesHtml(html: string): string | null 
   return null;
 }
 
+/**
+ * Heuristic: did LarpManager respond with its "Access denied" template?
+ *
+ * LarpManager serves an HTML page titled `Access denied - {event name}` with
+ * HTTP **200** (not 403) when the authenticated session lacks a required
+ * event-role permission. Without this discriminator, the response looks
+ * identical to a "no roles table found" scrape failure — see the production
+ * incident captured in `functions/test/fixtures/crucible-roles/access-denied.html`.
+ *
+ * The detector tolerates LM's exact `<title>` shape (whitespace + a sibling
+ * "- {event name}" suffix on a new line) by allowing arbitrary inner content
+ * around the literal phrase "Access denied". It is intentionally conservative:
+ * a real roles page never contains an `Access denied` title, so false
+ * positives are extremely unlikely.
+ */
+export function looksLikeLarpManagerAccessDeniedPage(html: string): boolean {
+  if (!html) return false;
+  return /<title\b[^>]*>[\s\S]*?\bAccess\s+denied\b[\s\S]*?<\/title>/i.test(html);
+}
+
+/**
+ * The actionable error message we want every organizer to see when LM denies
+ * access to the roles page. Names the exact LM permission (`orga_roles`) and
+ * tells them where to grant it. Returned as a pure string so unit tests can
+ * pin the wording (acceptance criterion: "organizer error copy now contains
+ * the specific LM-side remediation step").
+ */
+export function buildOrganizerAccessDeniedMessage(
+  rolesUrl: string,
+  slug: string
+): string {
+  return (
+    `LarpManager denied access to ${rolesUrl}. ` +
+    `In LarpManager, open /${slug}/manage/roles/, edit the Organizer role, ` +
+    "and grant the service-account user the `orga_roles` permission " +
+    "(Manage event roles)."
+  );
+}
+
 /** Parse `Name - email@host` patterns from the role edit form. */
 export function parseEmailsFromRoleEditHtml(html: string): string[] {
   const emails = new Set<string>();
@@ -128,6 +167,23 @@ export async function fetchOrganizerEmailsFromLarpManager(
       `LarpManager redirected ${rolesUrl} to a login page (final URL ${finalUrl}). ` +
         "The service account session is not authenticated — verify username, password, and Login path."
     );
+  }
+
+  // LM returns HTTP 200 with an "Access denied" body when the session is
+  // valid but lacks the `orga_roles` permission. Check this BEFORE the
+  // generic roles-table parse so organizers get an actionable remediation
+  // instead of the hedged "permission OR wrong slug" fallback message.
+  if (looksLikeLarpManagerAccessDeniedPage(rolesHtml)) {
+    logger.error(
+      "fetchOrganizerEmailsFromLarpManager: LM access-denied page returned",
+      {
+        requested: rolesUrl,
+        finalUrl,
+        status: rolesRes.status,
+        bodySnippet: rolesHtml.slice(0, 400),
+      }
+    );
+    throw new Error(buildOrganizerAccessDeniedMessage(rolesUrl, slug));
   }
 
   const roleUuid = findOrganizerRoleUuidFromRolesHtml(rolesHtml);
