@@ -24,6 +24,9 @@ const EMAIL = "Player@Example.COM";
 const EMAIL_LOWER = "player@example.com";
 const REG_DOC_ID = registrationDocIdForEmail(EMAIL);
 
+const ORG_META_PATH = `${BASE}/larpManagerOrganizersMeta/summary`;
+const REG_META_PATH = `${BASE}/larpManagerRegistrationsMeta/summary`;
+
 function freshTimestampSeed(): StubDocSeed[] {
   const ms = Date.now();
   const ts = { toMillis: () => ms, toDate: () => new Date(ms) };
@@ -172,6 +175,241 @@ test(
           /0\/\d+\s+names?\s+matched\s+mirror\s+export/i.test(l.msg)
         ),
         "should emit the '0/N matched mirror export' diagnostic line"
+      );
+    });
+  }
+);
+
+// --- Task 003: degraded-sync behaviour -----------------------------------
+//
+// These four tests cover the resilience contract: a failure in any of the
+// three sync collaborators (organizers, registrations, characters) must not
+// reject the callable nor block the others from running. Failed syncs are
+// surfaced as `*SyncError` fields on the result, with one `logger.error`
+// per failure naming the sync step (no email / character / credential PII).
+
+test(
+  "task003: org sync fails + cached organizer doc + cached reg with mirror char " +
+    "→ isOrganizer:true, hasCharacter:true, organizerSyncError populated",
+  async () => {
+    const { db } = makeFirestoreStub(
+      [
+        ...freshTimestampSeed(),
+        // Cached organizer doc for this user — populated by a prior successful sync.
+        {
+          path: `${BASE}/larpManagerOrganizers/${REG_DOC_ID}`,
+          data: { emailLower: EMAIL_LOWER, source: "larpmanager" },
+        },
+        {
+          path: `${BASE}/larpManagerRegistrations/${REG_DOC_ID}`,
+          data: { emailLower: EMAIL_LOWER, characterNames: ["Alice Hero"] },
+        },
+        {
+          path: `${BASE}/larpManagerMirrorChars/uuid-a`,
+          data: { name: "Alice Hero", uuid: "uuid-a", number: 1 },
+        },
+      ],
+      {
+        failOnGet: (path) =>
+          path === ORG_META_PATH
+            ? new Error("LM /manage/roles/ HTTP 500 (simulated)")
+            : null,
+      }
+    );
+    await withCapturedLogs(async (logs) => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, true);
+      assert.equal(r.registered, true);
+      assert.equal(r.hasCharacter, true);
+      assert.equal(r.role, "owner");
+      assert.equal(r.registrationSyncError, null);
+      assert.equal(r.characterSyncError, null);
+      assert.ok(
+        r.organizerSyncError && r.organizerSyncError.length > 0,
+        `expected organizerSyncError populated, got ${JSON.stringify(r.organizerSyncError)}`
+      );
+      assert.ok(
+        logs.some(
+          (l) =>
+            l.level === "error" &&
+            /organizer sync failed/i.test(l.msg) &&
+            (l.meta as { sync?: string } | undefined)?.sync ===
+              "syncLarpManagerOrganizers"
+        ),
+        "should log one logger.error naming syncLarpManagerOrganizers"
+      );
+    });
+  }
+);
+
+test(
+  "task003: org sync fails + no cached organizer doc + cached reg with matching " +
+    "mirror char → isOrganizer:false, registered:true, hasCharacter:true",
+  async () => {
+    const { db } = makeFirestoreStub(
+      [
+        ...freshTimestampSeed(),
+        {
+          path: `${BASE}/larpManagerRegistrations/${REG_DOC_ID}`,
+          data: { emailLower: EMAIL_LOWER, characterNames: ["Alice Hero"] },
+        },
+        {
+          path: `${BASE}/larpManagerMirrorChars/uuid-a`,
+          data: { name: "Alice Hero", uuid: "uuid-a", number: 1 },
+        },
+      ],
+      {
+        failOnGet: (path) =>
+          path === ORG_META_PATH
+            ? new Error("LM /manage/roles/ HTTP 500 (simulated)")
+            : null,
+      }
+    );
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, false);
+      assert.equal(r.registered, true);
+      assert.equal(r.hasCharacter, true);
+      assert.equal(r.characterCount, 1);
+      assert.equal(r.role, "player");
+      assert.equal(r.registrationSyncError, null);
+      assert.equal(r.characterSyncError, null);
+      assert.ok(
+        r.organizerSyncError && r.organizerSyncError.length > 0,
+        "organizerSyncError must be populated"
+      );
+      assert.equal(r.characterMessage, null);
+    });
+  }
+);
+
+test(
+  "task003: BOTH org and registration sync fail + user has a pre-existing " +
+    "/characters doc they own → hasCharacter:true via legacy fallback",
+  async () => {
+    const { db } = makeFirestoreStub(
+      [
+        ...freshTimestampSeed(),
+        // User is "registered" via the cached reg doc (with empty
+        // characterNames — exercise the legacy /characters fallback).
+        {
+          path: `${BASE}/larpManagerRegistrations/${REG_DOC_ID}`,
+          data: { emailLower: EMAIL_LOWER, characterNames: [] },
+        },
+        // Pre-existing character doc owned by this user.
+        {
+          path: `${BASE}/characters/uuid-legacy`,
+          data: { ownerId: UID, isArchived: false, name: "Legacy Char" },
+        },
+      ],
+      {
+        failOnGet: (path) => {
+          if (path === ORG_META_PATH) {
+            return new Error("LM /manage/roles/ HTTP 500 (simulated)");
+          }
+          if (path === REG_META_PATH) {
+            return new Error("LM registrations.zip HTTP 502 (simulated)");
+          }
+          return null;
+        },
+      }
+    );
+    await withCapturedLogs(async (logs) => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, false);
+      assert.equal(r.registered, true, "cached reg doc still grants registered");
+      assert.equal(
+        r.hasCharacter,
+        true,
+        "legacy /characters ownerId fallback should apply"
+      );
+      assert.ok(
+        r.organizerSyncError && r.organizerSyncError.length > 0,
+        "organizerSyncError populated"
+      );
+      assert.ok(
+        r.registrationSyncError && r.registrationSyncError.length > 0,
+        "registrationSyncError populated"
+      );
+      // The character sync itself runs successfully against the cached
+      // registration's empty characterNames + the /characters fallback.
+      assert.equal(r.characterSyncError, null);
+      assert.equal(
+        r.characterMessage,
+        null,
+        "no create-character copy when the legacy fallback found a character"
+      );
+      assert.ok(
+        logs.filter(
+          (l) => l.level === "error" && /sync failed/i.test(l.msg)
+        ).length >= 2,
+        "should log logger.error for both failed syncs"
+      );
+    });
+  }
+);
+
+test(
+  "task003: BOTH syncs fail + nothing cached for user → registered:false, " +
+    "hasCharacter:false, characterMessage:null, callable does not throw",
+  async () => {
+    const { db } = makeFirestoreStub([...freshTimestampSeed()], {
+      failOnGet: (path) => {
+        if (path === ORG_META_PATH) {
+          return new Error("LM /manage/roles/ HTTP 500 (simulated)");
+        }
+        if (path === REG_META_PATH) {
+          return new Error("LM registrations.zip HTTP 502 (simulated)");
+        }
+        return null;
+      },
+    });
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, false);
+      assert.equal(r.registered, false);
+      assert.equal(r.hasCharacter, false);
+      assert.equal(
+        r.characterMessage,
+        null,
+        "no misleading 'create a character' copy when we don't actually know"
+      );
+      assert.ok(
+        r.organizerSyncError && r.organizerSyncError.length > 0,
+        "organizerSyncError populated"
+      );
+      assert.ok(
+        r.registrationSyncError && r.registrationSyncError.length > 0,
+        "registrationSyncError populated"
+      );
+      assert.equal(r.characterSyncError, null);
+      assert.ok(
+        r.message?.includes("complete event registration"),
+        "fall back to the standard 'sign in to LarpManager' copy"
       );
     });
   }

@@ -3,6 +3,7 @@
  */
 
 import * as admin from "firebase-admin";
+import { logger } from "firebase-functions";
 
 import type { GameTenant } from "../gameTenant";
 import { gameEventBase, tenantKey } from "../gameTenant";
@@ -10,7 +11,9 @@ import {
   isEmailLarpManagerOrganizer,
   MEMBERSHIP_ORGANIZER_EMAIL_FIELD,
   MEMBERSHIP_ROLE_FIELD,
+  ORGANIZERS_META_DOC,
   syncLarpManagerOrganizers,
+  type LarpManagerOrganizerSyncResult,
 } from "./organizers";
 import {
   buildCharacterCreatePageUrl,
@@ -20,8 +23,10 @@ import {
   buildRegistrationPageUrl,
   MEMBERSHIP_REGISTERED_AT_FIELD,
   MEMBERSHIP_REGISTERED_EMAIL_FIELD,
+  REGISTRATIONS_META_DOC,
   registrationDocIdForEmail,
   syncLarpManagerRegistrations,
+  type LarpManagerRegistrationSyncResult,
 } from "./registrations";
 import type { LarpManagerSyncConfig } from "./types";
 
@@ -38,6 +43,24 @@ export interface LarpManagerPlayerAccessResult {
   characterCount: number;
   characterCreatePageUrl: string;
   characterMessage: string | null;
+  /** Short, user-safe error string when the organizer sync failed; `null` on success. */
+  organizerSyncError: string | null;
+  /** Short, user-safe error string when the registration sync failed; `null` on success. */
+  registrationSyncError: string | null;
+  /** Short, user-safe error string when the character sync failed; `null` on success. */
+  characterSyncError: string | null;
+}
+
+/**
+ * Trim and strip credentials / stack noise from an error so it is safe to
+ * return to a Flutter caller. Never include the raw email, character names,
+ * or service-account credentials.
+ */
+function safeSyncErrorMessage(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  const trimmed = raw.split("\n")[0]?.trim() ?? "";
+  if (!trimmed) return fallback;
+  return trimmed.length > 240 ? `${trimmed.slice(0, 237)}…` : trimmed;
 }
 
 export async function resolveLarpManagerPlayerAccess(
@@ -54,19 +77,92 @@ export async function resolveLarpManagerPlayerAccess(
   const tKey = tenantKey(tenant);
   const force = options?.forceSync === true;
 
-  const [orgSync, regSync] = await Promise.all([
+  // Run the two HTTP-backed syncs independently so one failure cannot
+  // hide the other or block the downstream character sync. The three
+  // collaborators below (`isEmailLarpManagerOrganizer`, the cached reg-doc
+  // lookup, and `syncPlayerCharactersForUser`'s legacy fallback) all read
+  // the cached Firestore docs already, so a degraded sync still serves
+  // previously-good data.
+  const [orgSettled, regSettled] = await Promise.allSettled([
     syncLarpManagerOrganizers(db, tenant, config, { force }),
     syncLarpManagerRegistrations(db, tenant, config, { force }),
   ]);
 
-  const metaSnap = await db
-    .doc(`${base}/larpManagerRegistrationsMeta/summary`)
-    .get();
-  const syncedAtTs = metaSnap.data()?.lastSyncedAt as
-    | admin.firestore.Timestamp
-    | undefined;
-  const syncedAt = syncedAtTs ? syncedAtTs.toDate().toISOString() : null;
+  let orgSync: LarpManagerOrganizerSyncResult | null = null;
+  let organizerSyncError: string | null = null;
+  if (orgSettled.status === "fulfilled") {
+    orgSync = orgSettled.value;
+  } else {
+    organizerSyncError = safeSyncErrorMessage(
+      orgSettled.reason,
+      "LarpManager organizer sync failed"
+    );
+    logger.error("resolveLarpManagerPlayerAccess: organizer sync failed", {
+      sync: "syncLarpManagerOrganizers",
+      eventBase: base,
+      error: organizerSyncError,
+    });
+  }
 
+  let regSync: LarpManagerRegistrationSyncResult | null = null;
+  let registrationSyncError: string | null = null;
+  if (regSettled.status === "fulfilled") {
+    regSync = regSettled.value;
+  } else {
+    registrationSyncError = safeSyncErrorMessage(
+      regSettled.reason,
+      "LarpManager registration sync failed"
+    );
+    logger.error("resolveLarpManagerPlayerAccess: registration sync failed", {
+      sync: "syncLarpManagerRegistrations",
+      eventBase: base,
+      error: registrationSyncError,
+    });
+  }
+
+  // Counts fall back to the most recent cached meta totals so the UI still
+  // reflects last-known-good numbers when a refresh failed.
+  let organizerCount = orgSync?.organizerCount ?? 0;
+  let registrationCount = regSync?.registrationCount ?? 0;
+  if (orgSync === null) {
+    try {
+      const metaSnap = await db.doc(`${base}/${ORGANIZERS_META_DOC}`).get();
+      const cached = metaSnap.data()?.organizerCount;
+      if (typeof cached === "number") organizerCount = cached;
+    } catch {
+      // Cached meta unavailable — leave at 0.
+    }
+  }
+
+  // The registrations-meta doc gives us `syncedAt`. Treat its read as best-
+  // effort: if Firestore is unhappy we surface a null timestamp rather than
+  // poisoning the whole response.
+  let syncedAt: string | null = null;
+  try {
+    const metaSnap = await db
+      .doc(`${base}/${REGISTRATIONS_META_DOC}`)
+      .get();
+    const data = metaSnap.data();
+    const syncedAtTs = data?.lastSyncedAt as
+      | admin.firestore.Timestamp
+      | undefined;
+    if (syncedAtTs) syncedAt = syncedAtTs.toDate().toISOString();
+    if (regSync === null && typeof data?.registrationCount === "number") {
+      registrationCount = data.registrationCount as number;
+    }
+  } catch (e) {
+    logger.warn(
+      "resolveLarpManagerPlayerAccess: registrations meta read failed",
+      {
+        eventBase: base,
+        error: e instanceof Error ? e.message : String(e),
+      }
+    );
+  }
+
+  // Cached organizer / registration lookups never touch HTTP, so they are
+  // safe to run even when the upstream sync failed — they just return
+  // whatever the last successful sync wrote.
   const isOrganizer = await isEmailLarpManagerOrganizer(
     db,
     tenant,
@@ -108,15 +204,47 @@ export async function resolveLarpManagerPlayerAccess(
       "complete event registration, then tap Check registration status.";
   }
 
-  let charSync = { hasCharacter: false, characterCount: 0 };
+  let charSync: { hasCharacter: boolean; characterCount: number } = {
+    hasCharacter: false,
+    characterCount: 0,
+  };
+  let characterSyncError: string | null = null;
   if (isOrganizer || registered) {
-    charSync = await syncPlayerCharactersForUser(
-      db,
-      tenant,
-      config,
-      uid,
-      emailLower
-    );
+    try {
+      charSync = await syncPlayerCharactersForUser(
+        db,
+        tenant,
+        config,
+        uid,
+        emailLower
+      );
+    } catch (e) {
+      characterSyncError = safeSyncErrorMessage(
+        e,
+        "LarpManager character sync failed"
+      );
+      logger.error("resolveLarpManagerPlayerAccess: character sync failed", {
+        sync: "syncPlayerCharactersForUser",
+        eventBase: base,
+        error: characterSyncError,
+      });
+      // Fall through: probe the cached `/characters` collection so a user
+      // who already has a synced character doc isn't told "No character yet"
+      // just because today's refresh attempt failed.
+      try {
+        const cachedChars = await db
+          .collection(`${base}/characters`)
+          .where("ownerId", "==", uid)
+          .where("isArchived", "==", false)
+          .limit(1)
+          .get();
+        if (!cachedChars.empty) {
+          charSync = { hasCharacter: true, characterCount: cachedChars.size };
+        }
+      } catch {
+        // Cached read unavailable — leave at the safe default.
+      }
+    }
   }
 
   const hasCharacter = isOrganizer || charSync.hasCharacter;
@@ -133,13 +261,16 @@ export async function resolveLarpManagerPlayerAccess(
     isOrganizer,
     role,
     registrationPageUrl,
-    registrationCount: regSync.registrationCount,
-    organizerCount: orgSync.organizerCount,
+    registrationCount,
+    organizerCount,
     syncedAt,
     message,
     hasCharacter,
     characterCount: charSync.characterCount,
     characterCreatePageUrl,
     characterMessage,
+    organizerSyncError,
+    registrationSyncError,
+    characterSyncError,
   };
 }

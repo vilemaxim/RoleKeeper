@@ -52,6 +52,16 @@ export interface FirestoreStub {
   store: Map<string, Record<string, unknown>>;
 }
 
+/**
+ * Optional hooks injected at construction time. `failOnGet` is invoked on
+ * every `.get()` (both document and collection-query reads) — return an Error
+ * to make that read reject, or `null` to let it proceed. Tests use this to
+ * simulate degraded Firestore / failing sync attempts without touching HTTP.
+ */
+export interface FirestoreStubOptions {
+  failOnGet?: (path: string, kind: "doc" | "collection") => Error | null;
+}
+
 interface StubCollectionRef {
   doc: (id: string) => StubDocRef;
   where: (field: string, op: string, val: unknown) => StubQuery;
@@ -74,14 +84,22 @@ interface StubBatch {
   commit: () => Promise<void>;
 }
 
-export function makeFirestoreStub(seed: StubDocSeed[] = []): FirestoreStub {
+export function makeFirestoreStub(
+  seed: StubDocSeed[] = [],
+  options: FirestoreStubOptions = {}
+): FirestoreStub {
   const store = new Map<string, Record<string, unknown>>();
   for (const d of seed) store.set(d.path, { ...d.data });
   const writes: StubWrite[] = [];
+  const failOnGet = options.failOnGet;
 
   const docRef = (path: string): StubDocRef => ({
     _path: path,
     async get() {
+      if (failOnGet) {
+        const err = failOnGet(path, "doc");
+        if (err) throw err;
+      }
       const data = store.get(path);
       return {
         exists: data !== undefined,
@@ -125,6 +143,13 @@ export function makeFirestoreStub(seed: StubDocSeed[] = []): FirestoreStub {
     return { empty: matching.length === 0, size: matching.length, docs: matching };
   };
 
+  const maybeFailCollection = (path: string): void => {
+    if (failOnGet) {
+      const err = failOnGet(path, "collection");
+      if (err) throw err;
+    }
+  };
+
   const query = (
     basePath: string,
     filters: readonly Filter[],
@@ -133,14 +158,20 @@ export function makeFirestoreStub(seed: StubDocSeed[] = []): FirestoreStub {
     where: (field, op, val) =>
       query(basePath, [...filters, [field, op, val] as const], limit),
     limit: (n) => query(basePath, filters, n),
-    get: async () => applyQuery(basePath, filters, limit),
+    get: async () => {
+      maybeFailCollection(basePath);
+      return applyQuery(basePath, filters, limit);
+    },
   });
 
   const collectionRef = (path: string): StubCollectionRef => ({
     doc: (id: string) => docRef(`${path}/${id}`),
     where: (field, op, val) => query(path, [[field, op, val] as const]),
     limit: (n) => query(path, [], n),
-    get: async () => applyQuery(path, [], undefined),
+    get: async () => {
+      maybeFailCollection(path);
+      return applyQuery(path, [], undefined);
+    },
   });
 
   const batch = (): StubBatch => {
