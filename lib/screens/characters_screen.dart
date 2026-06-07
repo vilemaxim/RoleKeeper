@@ -16,26 +16,67 @@ import 'character_detail_screen.dart';
 import 'larp_manager_integration_screen.dart';
 
 /// Character list (portfolio) for the current user.
-class CharactersScreen extends StatefulWidget {
+///
+/// Wraps [CharactersScreenBody] in [LmIntegrationGate] so users without
+/// working LM integration see the setup prompt instead. Widget tests target
+/// [CharactersScreenBody] directly to bypass the gate.
+class CharactersScreen extends StatelessWidget {
   const CharactersScreen({super.key});
 
   @override
-  State<CharactersScreen> createState() => _CharactersScreenState();
+  Widget build(BuildContext context) {
+    return LmIntegrationGate(
+      title: 'Characters',
+      child: CharactersScreenBody(
+        registrationService: LarpManagerRegistrationService(),
+        charactersRepository: CharactersRepository(),
+        membershipService: GameMembershipService(),
+      ),
+    );
+  }
 }
 
-class _CharactersScreenState extends State<CharactersScreen> {
-  final _repo = CharactersRepository();
-  final _registrationService = LarpManagerRegistrationService();
-  final _membershipService = GameMembershipService();
+/// Inner body for [CharactersScreen]. Accepts services via constructor so
+/// widget tests can drive it without booting the LM integration gate.
+class CharactersScreenBody extends StatefulWidget {
+  const CharactersScreenBody({
+    super.key,
+    required this.registrationService,
+    required this.charactersRepository,
+    required this.membershipService,
+    this.auth,
+  });
 
+  final LarpManagerRegistrationService registrationService;
+  final CharactersRepository charactersRepository;
+  final GameMembershipService membershipService;
+
+  /// Auth used only to render the "Not signed in" empty state. Defaults to
+  /// [FirebaseAuth.instance]; widget tests inject a mock to avoid booting
+  /// Firebase.
+  final FirebaseAuth? auth;
+
+  @override
+  State<CharactersScreenBody> createState() => _CharactersScreenBodyState();
+}
+
+class _CharactersScreenBodyState extends State<CharactersScreenBody> {
   GameRole _role = GameRole.player;
   bool _checking = false;
   String? _characterMessage;
   LarpManagerEventLink? _eventLink;
   bool _lmIntegrationMissing = false;
   String? _syncError;
+  String? _organizerSyncError;
+  String? _registrationSyncError;
+  String? _characterSyncError;
 
   bool get _isOrganizer => _role.canConfigureDeathRules;
+
+  bool get _hasAnySyncError =>
+      _organizerSyncError != null ||
+      _registrationSyncError != null ||
+      _characterSyncError != null;
 
   @override
   void initState() {
@@ -45,14 +86,14 @@ class _CharactersScreenState extends State<CharactersScreen> {
 
   Future<void> _bootstrap() async {
     await _loadEventLink();
-    final role = await _membershipService.getRoleInGame();
+    final role = await widget.membershipService.getRoleInGame();
     if (!mounted) return;
     setState(() => _role = role);
     await _refreshCharacterStatus();
   }
 
   Future<void> _loadEventLink() async {
-    final link = await _registrationService.getEventLinkForTenant(
+    final link = await widget.registrationService.getEventLinkForTenant(
       GameContextService.instance.currentTenantKey,
     );
     if (!mounted) return;
@@ -70,7 +111,7 @@ class _CharactersScreenState extends State<CharactersScreen> {
       await _loadEventLink();
 
       final check =
-          await _registrationService.verifyRegistrationForCurrentGame(
+          await widget.registrationService.verifyRegistrationForCurrentGame(
         forceRefresh: forceRefresh,
       );
 
@@ -89,12 +130,15 @@ class _CharactersScreenState extends State<CharactersScreen> {
         );
       }
 
-      final role = await _membershipService.getRoleInGame();
+      final role = await widget.membershipService.getRoleInGame();
       if (!mounted) return;
       setState(() {
         _role = role;
         _eventLink = link;
         _characterMessage = check.characterMessage;
+        _organizerSyncError = check.organizerSyncError;
+        _registrationSyncError = check.registrationSyncError;
+        _characterSyncError = check.characterSyncError;
         _checking = false;
       });
     } on FirebaseFunctionsException catch (e, st) {
@@ -166,11 +210,9 @@ class _CharactersScreenState extends State<CharactersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = (widget.auth ?? FirebaseAuth.instance).currentUser?.uid;
 
-    return LmIntegrationGate(
-      title: 'Characters',
-      child: Scaffold(
+    return Scaffold(
       appBar: AppBar(
         title: const Text('Characters'),
         actions: [
@@ -191,76 +233,100 @@ class _CharactersScreenState extends State<CharactersScreen> {
       ),
       body: userId == null
           ? const Center(child: Text('Not signed in'))
-          : StreamBuilder<List<Character>>(
-              stream: _repo.watchCharacters(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 48,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Error: ${snapshot.error}',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final characters = snapshot.data ?? [];
-                if (characters.isEmpty) {
-                  return _EmptyCharactersBody(
-                    isOrganizer: _isOrganizer,
-                    checking: _checking,
-                    message: _characterMessage,
-                    eventLink: _eventLink,
-                    integrationMissing: _lmIntegrationMissing,
-                    syncError: _syncError,
-                    onOpenCreate: _openLarpManagerCharacterCreate,
-                    onCheckAgain: () =>
-                        _refreshCharacterStatus(forceRefresh: true),
-                    onOpenLmIntegration: _openLmIntegration,
-                  );
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: characters.length,
-                  itemBuilder: (context, index) {
-                    final c = characters[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          child: Text(
-                            c.name.isNotEmpty
-                                ? c.name[0].toUpperCase()
-                                : '?',
+          : Column(
+              children: [
+                if (_hasAnySyncError)
+                  _LmSyncDegradedBanner(
+                    organizerSyncError: _organizerSyncError,
+                    registrationSyncError: _registrationSyncError,
+                    characterSyncError: _characterSyncError,
+                    onRetry: _checking
+                        ? null
+                        : () => _refreshCharacterStatus(forceRefresh: true),
+                  ),
+                Expanded(
+                  child: StreamBuilder<List<Character>>(
+                    stream: widget.charactersRepository.watchCharacters(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.error_outline,
+                                size: 48,
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Error: ${snapshot.error}',
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
                           ),
-                        ),
-                        title: Text(c.name),
-                        subtitle: Text(
-                          c.gameSystemName != null
-                              ? '${c.shortId} • ${c.gameSystemName!}'
-                              : c.shortId,
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _openDetail(context, c),
-                      ),
-                    );
-                  },
-                );
-              },
+                        );
+                      }
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
+                      final characters = snapshot.data ?? [];
+                      if (characters.isEmpty) {
+                        // If a sync degraded and we don't have a character,
+                        // the banner already explains the situation — skip
+                        // the generic "Create a character on LarpManager"
+                        // empty-state copy so we don't misdirect the user.
+                        if (_hasAnySyncError) {
+                          return const SizedBox.shrink();
+                        }
+                        return _EmptyCharactersBody(
+                          isOrganizer: _isOrganizer,
+                          checking: _checking,
+                          message: _characterMessage,
+                          eventLink: _eventLink,
+                          integrationMissing: _lmIntegrationMissing,
+                          syncError: _syncError,
+                          onOpenCreate: _openLarpManagerCharacterCreate,
+                          onCheckAgain: () =>
+                              _refreshCharacterStatus(forceRefresh: true),
+                          onOpenLmIntegration: _openLmIntegration,
+                        );
+                      }
+                      return ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: characters.length,
+                        itemBuilder: (context, index) {
+                          final c = characters[index];
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                child: Text(
+                                  c.name.isNotEmpty
+                                      ? c.name[0].toUpperCase()
+                                      : '?',
+                                ),
+                              ),
+                              title: Text(c.name),
+                              subtitle: Text(
+                                c.gameSystemName != null
+                                    ? '${c.shortId} • ${c.gameSystemName!}'
+                                    : c.shortId,
+                              ),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => _openDetail(context, c),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
-      ),
     );
   }
 
@@ -270,6 +336,67 @@ class _CharactersScreenState extends State<CharactersScreen> {
       MaterialPageRoute(
         builder: (context) => CharacterDetailScreen(character: character),
       ),
+    );
+  }
+}
+
+/// Non-blocking warning banner shown above the character list/empty-state
+/// when one of the LM sync steps (organizers, registrations, characters)
+/// degraded server-side but the callable still returned useful data.
+class _LmSyncDegradedBanner extends StatelessWidget {
+  const _LmSyncDegradedBanner({
+    required this.organizerSyncError,
+    required this.registrationSyncError,
+    required this.characterSyncError,
+    required this.onRetry,
+  });
+
+  final String? organizerSyncError;
+  final String? registrationSyncError;
+  final String? characterSyncError;
+  final VoidCallback? onRetry;
+
+  static const _organizerCopy =
+      "Couldn't refresh organizer permissions from LarpManager. "
+      'Your character data is current; ask your event organizer to check '
+      'LM Integration.';
+  static const _registrationCopy =
+      "Couldn't refresh event registrations from LarpManager. "
+      'If your character is missing, retry or contact your organizer.';
+  static const _characterCopy =
+      "Couldn't sync characters from LarpManager. Showing last-known data.";
+
+  String _bannerText() {
+    // Priority: organizer first (highest-impact for organizers), then
+    // registration, then character. We surface a single composite message
+    // when more than one degraded so users still see every relevant note.
+    final parts = <String>[
+      if (organizerSyncError != null) _organizerCopy,
+      if (registrationSyncError != null) _registrationCopy,
+      if (characterSyncError != null) _characterCopy,
+    ];
+    return parts.join('\n\n');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return MaterialBanner(
+      backgroundColor: scheme.errorContainer,
+      content: Text(
+        _bannerText(),
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: scheme.onErrorContainer,
+            ),
+      ),
+      leading: Icon(Icons.warning_amber_rounded, color: scheme.onErrorContainer),
+      actions: [
+        TextButton(
+          onPressed: onRetry,
+          style: TextButton.styleFrom(foregroundColor: scheme.onErrorContainer),
+          child: const Text('Retry sync'),
+        ),
+      ],
     );
   }
 }

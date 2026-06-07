@@ -31,6 +31,13 @@ firebase-debug.log
 firebase-debug.*.log
 .firebase/
 
+# Scripts build output
+scripts/lib/
+
+# LarpManager fixture dumps captured with --no-scrub MUST NOT be committed.
+# scripts/capture-lm-fixture.ts auto-appends '-unscrubbed' when --no-scrub is set.
+functions/test/fixtures/*-unscrubbed/
+
 # IDE & tools
 .claude/
 .cursor/history/

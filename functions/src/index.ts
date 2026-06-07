@@ -685,6 +685,10 @@ export const checkLarpManagerRegistrationCallable = onCall(
     }
 
     try {
+      // `resolveLarpManagerPlayerAccess` returns sync failures as
+      // `organizerSyncError` / `registrationSyncError` / `characterSyncError`
+      // fields on the result; we only reach this catch for genuinely
+      // unexpected exceptions (e.g. Firestore unavailable, programming bug).
       return await resolveLarpManagerPlayerAccess(
         admin.firestore(),
         tenant,

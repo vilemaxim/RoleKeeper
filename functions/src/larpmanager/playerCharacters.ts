@@ -5,6 +5,7 @@
 import * as crypto from "crypto";
 
 import * as admin from "firebase-admin";
+import { logger } from "firebase-functions";
 
 import type { GameTenant } from "../gameTenant";
 import { gameEventBase } from "../gameTenant";
@@ -123,6 +124,8 @@ export async function syncPlayerCharactersForUser(
   const charsCol = db.collection(`${base}/characters`);
   const lookupCol = db.collection(`${base}/characterShortIdLookup`);
 
+  // Diagnostic logging is PII-free: only `uid` and the (non-secret) event
+  // base path are recorded. Never log raw email addresses or character names.
   const regSnap = await db
     .doc(
       `${base}/larpManagerRegistrations/${registrationDocIdForEmail(emailLower)}`
@@ -132,12 +135,28 @@ export async function syncPlayerCharactersForUser(
   const characterNames =
     (regSnap.data()?.characterNames as string[] | undefined) ?? [];
 
+  logger.info("syncPlayerCharactersForUser: registration read", {
+    uid,
+    eventBase: base,
+    regExists: regSnap.exists,
+    namesCount: characterNames.length,
+  });
+
   if (characterNames.length === 0) {
     const existing = await charsCol
       .where("ownerId", "==", uid)
       .where("isArchived", "==", false)
       .limit(1)
       .get();
+    logger.info(
+      "syncPlayerCharactersForUser: registration has empty characterNames",
+      {
+        uid,
+        eventBase: base,
+        regExists: regSnap.exists,
+        existingChars: existing.size,
+      }
+    );
     return {
       hasCharacter: !existing.empty,
       characterCount: existing.size,
@@ -150,7 +169,16 @@ export async function syncPlayerCharactersForUser(
     config,
     options?.jar
   );
+  const mirrorSize = Object.keys(exportMap).length;
   const resolved = resolveCharactersByNames(exportMap, characterNames);
+
+  logger.info("syncPlayerCharactersForUser: resolved", {
+    uid,
+    eventBase: base,
+    namesCount: characterNames.length,
+    mirrorSize,
+    matchedCount: resolved.length,
+  });
 
   if (resolved.length === 0) {
     const existing = await charsCol
@@ -158,6 +186,15 @@ export async function syncPlayerCharactersForUser(
       .where("isArchived", "==", false)
       .limit(1)
       .get();
+    logger.info(
+      `syncPlayerCharactersForUser: 0/${characterNames.length} names matched mirror export`,
+      {
+        uid,
+        eventBase: base,
+        mirrorSize,
+        existingChars: existing.size,
+      }
+    );
     return {
       hasCharacter: !existing.empty,
       characterCount: existing.size,
@@ -193,6 +230,12 @@ export async function syncPlayerCharactersForUser(
     }
     await batch.commit();
   }
+
+  logger.info("syncPlayerCharactersForUser: wrote characters", {
+    uid,
+    eventBase: base,
+    written: resolved.length,
+  });
 
   return {
     hasCharacter: true,

@@ -1,0 +1,51 @@
+<!--
+  LarpManager "Access denied" template, captured from the
+  /<event>/manage/roles/ endpoint when the authenticated service account
+  lacks the `orga_roles` permission on the Organizer role.
+
+  Source: production checkLarpManagerRegistrationCallable log entry
+  2026-06-01T19:13:12.951584Z (bodySnippet field, first 800 chars). LM
+  returns HTTP 200 with this body — NOT a 403 — which is why every
+  pre-existing guard in fetchOrganizerEmailsFromLarpManager fell through
+  to the generic "no roles table" branch before Task 004.
+
+  Event-identifying strings (event name, slug) have been replaced with
+  placeholders so the fixture is reusable across tenants. The DOCTYPE,
+  whitespace shape inside <title>, meta tags, and `<style>` block are
+  preserved verbatim from LM's emitted HTML — the access-denied detector
+  matches on the <title>...Access denied...</title> shape and would
+  break if LM ever changes that template.
+-->
+<!DOCTYPE HTML>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>
+            
+                
+    Access denied
+
+                - Example LARP
+            
+        </title>
+        
+          <meta name="keywords" content="LarpManager">
+            <meta name="description" content="LarpManager">
+        
+        <meta property="og:url" content="/example-event/manage/roles/">
+        <meta property="og:type" content="website">
+    <meta property="og:logo" content="/static/lm_fav_new.png">
+        <style>
+            html body .hide {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>Access denied</h1>
+            <p>You do not have permission to view this page.</p>
+        </main>
+    </body>
+</html>
