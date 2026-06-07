@@ -414,3 +414,224 @@ test(
     });
   }
 );
+
+// --- Task 006: organizer-with-no-character honesty -------------------------
+//
+// Before the fix, `playerAccess` short-circuited `hasCharacter = isOrganizer
+// || charSync.hasCharacter`, so every organizer was told "you have a
+// character" even when /characters had zero docs under their ownerId. The
+// Flutter Characters screen (which reads /characters directly) then showed
+// the empty state with no actionable message. These tests pin the fix:
+// `hasCharacter` reflects reality, and `characterMessage` carries the
+// LM-side remediation copy.
+
+test(
+  "TASK 006: organizer + bulk mirror has matching player_email → " +
+    "isOrganizer:true, hasCharacter:true, characterMessage null",
+  async () => {
+    const { db, store } = makeFirestoreStub([
+      ...freshTimestampSeed(),
+      // Cached organizer doc: this user is recognised as an organizer.
+      {
+        path: `${BASE}/larpManagerOrganizers/${REG_DOC_ID}`,
+        data: { emailLower: EMAIL_LOWER, source: "larpmanager" },
+      },
+      // Organizer is NOT in the registrations CSV (the bug scenario).
+      // Mirror has a character whose `export.player_email` matches them.
+      {
+        path: `${BASE}/larpManagerMirrorChars/uuid-cassandra`,
+        data: {
+          number: 7,
+          name: "Cassandra Quartermaster",
+          uuid: "uuid-cassandra",
+          export: {
+            number: 7,
+            name: "Cassandra Quartermaster",
+            uuid: "uuid-cassandra",
+            player_email: EMAIL_LOWER,
+          },
+        },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, true);
+      assert.equal(r.role, "owner");
+      assert.equal(r.hasCharacter, true);
+      assert.equal(r.characterCount, 1);
+      assert.equal(r.characterMessage, null);
+      assert.ok(
+        store.get(`${BASE}/characters/uuid-cassandra`),
+        "organizer fallback should write the character doc"
+      );
+    });
+  }
+);
+
+test(
+  "TASK 006: organizer + bulk mirror has NO matching email → " +
+    "hasCharacter:false (no more isOrganizer-lie) + LM-email-mismatch copy",
+  async () => {
+    const { db } = makeFirestoreStub([
+      ...freshTimestampSeed(),
+      {
+        path: `${BASE}/larpManagerOrganizers/${REG_DOC_ID}`,
+        data: { emailLower: EMAIL_LOWER, source: "larpmanager" },
+      },
+      // Mirror has chars, but none belong to this organizer.
+      {
+        path: `${BASE}/larpManagerMirrorChars/uuid-other`,
+        data: {
+          number: 1,
+          name: "Other Player",
+          uuid: "uuid-other",
+          export: {
+            number: 1,
+            name: "Other Player",
+            uuid: "uuid-other",
+            player_email: "someone-else@example.test",
+          },
+        },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, true);
+      assert.equal(
+        r.hasCharacter,
+        false,
+        "hasCharacter must NOT be short-circuited true for organizers"
+      );
+      assert.equal(r.characterCount, 0);
+      assert.ok(
+        r.characterMessage &&
+          /LarpManager email/i.test(r.characterMessage) &&
+          /sign in to RoleKeeper/i.test(r.characterMessage),
+        `expected LM-email-mismatch copy, got ${JSON.stringify(r.characterMessage)}`
+      );
+    });
+  }
+);
+
+test(
+  "TASK 006: organizer + bulk mirror has MULTIPLE matching chars → " +
+    "hasCharacter:false + ambiguity copy (no auto-pick)",
+  async () => {
+    const { db, writes } = makeFirestoreStub([
+      ...freshTimestampSeed(),
+      {
+        path: `${BASE}/larpManagerOrganizers/${REG_DOC_ID}`,
+        data: { emailLower: EMAIL_LOWER, source: "larpmanager" },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/uuid-main`,
+        data: {
+          number: 1,
+          name: "Main Character",
+          uuid: "uuid-main",
+          export: {
+            number: 1,
+            name: "Main Character",
+            uuid: "uuid-main",
+            player_email: EMAIL_LOWER,
+          },
+        },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/uuid-alt`,
+        data: {
+          number: 2,
+          name: "Alt Character",
+          uuid: "uuid-alt",
+          export: {
+            number: 2,
+            name: "Alt Character",
+            uuid: "uuid-alt",
+            player_email: EMAIL_LOWER,
+          },
+        },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, true);
+      assert.equal(r.hasCharacter, false);
+      assert.equal(r.characterCount, 0);
+      assert.ok(
+        r.characterMessage &&
+          /multiple/i.test(r.characterMessage) &&
+          /reassign/i.test(r.characterMessage),
+        `expected ambiguity copy, got ${JSON.stringify(r.characterMessage)}`
+      );
+      assert.equal(
+        writes.filter((w) => w.path.startsWith(`${BASE}/characters/`)).length,
+        0,
+        "ambiguous matches must not write any /characters doc"
+      );
+    });
+  }
+);
+
+test(
+  "TASK 006: organizer + already has a /characters doc → hasCharacter:true, " +
+    "characterMessage null (legacy probe still works under the fix)",
+  async () => {
+    const { db } = makeFirestoreStub([
+      ...freshTimestampSeed(),
+      {
+        path: `${BASE}/larpManagerOrganizers/${REG_DOC_ID}`,
+        data: { emailLower: EMAIL_LOWER, source: "larpmanager" },
+      },
+      // Mirror has no characters for this organizer's email…
+      {
+        path: `${BASE}/larpManagerMirrorChars/uuid-other`,
+        data: {
+          number: 1,
+          name: "Other",
+          uuid: "uuid-other",
+          export: {
+            number: 1,
+            uuid: "uuid-other",
+            player_email: "someone-else@example.test",
+          },
+        },
+      },
+      // …but a previously-synced character doc already exists for the organizer.
+      {
+        path: `${BASE}/characters/legacy-org-char`,
+        data: { ownerId: UID, isArchived: false, name: "Legacy" },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, true);
+      assert.equal(r.hasCharacter, true, "legacy /characters probe wins");
+      assert.equal(r.characterCount, 1);
+      assert.equal(r.characterMessage, null);
+    });
+  }
+);

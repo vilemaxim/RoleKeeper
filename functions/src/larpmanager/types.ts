@@ -22,6 +22,20 @@ export interface LarpManagerCharacterExport {
   name?: string;
   uuid?: string;
   teaser?: string;
+  /**
+   * Optional email of the LarpManager user assigned to this character. LM
+   * uses one of several field names across installations / event configs
+   * (`player_email` on hosted larpmanager.com; older installs sometimes use
+   * `player`, `user_email`, or a bare `email`). These fields are declared so
+   * downstream code can be explicit about what it consumes, but the
+   * organizer email-mirror lookup in `playerCharacters.ts` walks ALL
+   * string-valued fields rather than relying on any single key so it stays
+   * resilient to future LM schema drift.
+   */
+  player_email?: string;
+  player?: string;
+  user_email?: string;
+  email?: string;
   [key: string]: unknown;
 }
 

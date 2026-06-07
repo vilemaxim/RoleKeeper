@@ -261,8 +261,6 @@ RoleKeeper/
 | **Firebase Hosting** | Serves the Flutter web app |
 | **FCM** | Push notifications (Phase 2+) |
 
-See `project-documentation/api-contracts.md` for full API specs.
-
 ---
 
 ## Troubleshooting

@@ -204,9 +204,16 @@ export async function resolveLarpManagerPlayerAccess(
       "complete event registration, then tap Check registration status.";
   }
 
-  let charSync: { hasCharacter: boolean; characterCount: number } = {
+  let charSync: {
+    hasCharacter: boolean;
+    characterCount: number;
+    organizerLookupAttempted: boolean;
+    organizerLookupMatches: number;
+  } = {
     hasCharacter: false,
     characterCount: 0,
+    organizerLookupAttempted: false,
+    organizerLookupMatches: 0,
   };
   let characterSyncError: string | null = null;
   if (isOrganizer || registered) {
@@ -216,7 +223,8 @@ export async function resolveLarpManagerPlayerAccess(
         tenant,
         config,
         uid,
-        emailLower
+        emailLower,
+        { isOrganizer }
       );
     } catch (e) {
       characterSyncError = safeSyncErrorMessage(
@@ -239,7 +247,12 @@ export async function resolveLarpManagerPlayerAccess(
           .limit(1)
           .get();
         if (!cachedChars.empty) {
-          charSync = { hasCharacter: true, characterCount: cachedChars.size };
+          charSync = {
+            hasCharacter: true,
+            characterCount: cachedChars.size,
+            organizerLookupAttempted: false,
+            organizerLookupMatches: 0,
+          };
         }
       } catch {
         // Cached read unavailable — leave at the safe default.
@@ -247,13 +260,41 @@ export async function resolveLarpManagerPlayerAccess(
     }
   }
 
-  const hasCharacter = isOrganizer || charSync.hasCharacter;
+  // `hasCharacter` is the truth: only true when there's an actual
+  // `/characters` doc owned by this uid. We previously short-circuited this
+  // to `true` for every organizer, which lied to the Flutter caller (the
+  // Characters screen reads /characters directly and showed an empty state
+  // anyway) and suppressed the diagnostic `characterMessage`. See Task 006.
+  const hasCharacter = charSync.hasCharacter;
 
+  // Build a single piece of actionable copy when we couldn't associate a
+  // character. The three cases are deliberately distinct so each surfaces
+  // the smallest fix the user can take on the LarpManager side:
+  //   1. Organizer + email-mirror lookup found nothing — their LM email
+  //      doesn't match any character on this event.
+  //   2. Organizer + email-mirror lookup found multiple — they must pick
+  //      one on LM-side; we won't auto-assign across characters.
+  //   3. Plain registered player with no character — standard
+  //      "create one on LM" copy (the pre-Task-006 behaviour).
   let characterMessage: string | null = null;
-  if (!isOrganizer && registered && !charSync.hasCharacter) {
-    characterMessage =
-      "Create a character on LarpManager for this event, assign it to your " +
-      "registration, then tap Check character status.";
+  if (!hasCharacter) {
+    if (isOrganizer && charSync.organizerLookupAttempted) {
+      if (charSync.organizerLookupMatches === 0) {
+        characterMessage =
+          "Your LarpManager email doesn't match any character on this event. " +
+          "Confirm that your LarpManager character's assigned-player email " +
+          "matches the email you used to sign in to RoleKeeper.";
+      } else if (charSync.organizerLookupMatches > 1) {
+        characterMessage =
+          "Multiple LarpManager characters list your email. RoleKeeper won't " +
+          "auto-pick — open LarpManager, reassign all but one of those " +
+          "characters away from your email, then tap Check character status.";
+      }
+    } else if (registered) {
+      characterMessage =
+        "Create a character on LarpManager for this event, assign it to your " +
+        "registration, then tap Check character status.";
+    }
   }
 
   return {

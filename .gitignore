@@ -47,6 +47,18 @@ functions/test/fixtures/*-unscrubbed/
 *.swp
 *.swo
 
+# AI / agent build infrastructure — not part of the RoleKeeper application.
+# These files help build the app but are not the app itself, so they live
+# locally and are intentionally not tracked in git.
+tdd-mcp/
+.cursor/mcp.json
+.cursor/rules/tdd-worker.mdc
+.cursor/rules/planner.mdc
+.agent-context.md
+docs/tasks/
+SETUP.md
+project-documentation/
+
 # OS
 .DS_Store
 Thumbs.db

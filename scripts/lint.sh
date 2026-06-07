@@ -1,7 +1,7 @@
 #!/bin/bash
 # RoleKeeper lint script — runs all linters across the full stack.
-# Called by the TDD MCP server before accepting a `success` call.
-# Exit code 0 = all clean. Non-zero = failure (blocks state advance).
+# Run locally before pushing; also invoked by CI.
+# Exit code 0 = all clean. Non-zero = failure.
 
 set -e  # Exit immediately on any error
 

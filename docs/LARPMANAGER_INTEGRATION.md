@@ -228,7 +228,7 @@ def character_external(request, event_slug: str, code: str):
 3. For each character: fetch HTML from `character/{uuid}/` and parse; optionally fetch `abilities/json` and `inventory/json` for rules data.
 4. Cache locally; handle session expiry (prompt re-login when 401). “view full sheet in browser” when parsing is incomplete.
 
-**If the app should not call LarpManager directly:** Use a [backend sync worker](#backend-sync-worker-rolekeeper-server) that stores delegated credentials encrypted server-side, polls the same HTTPS endpoints, and writes normalized documents to Firestore. The Flutter client then matches the rest of RoleKeeper’s sync story ([system-architecture](../project-documentation/system-architecture.md)).
+**If the app should not call LarpManager directly:** Use a [backend sync worker](#backend-sync-worker-rolekeeper-server) that stores delegated credentials encrypted server-side, polls the same HTTPS endpoints, and writes normalized documents to Firestore. The Flutter client then matches the rest of RoleKeeper’s sync story.
 
 ---
 

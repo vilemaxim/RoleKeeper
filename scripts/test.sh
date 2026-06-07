@@ -1,7 +1,7 @@
 #!/bin/bash
 # RoleKeeper test script — runs all tests across the full stack.
-# Called by the TDD MCP server before accepting a `success` call.
-# Exit code 0 = all pass. Non-zero = failure (blocks state advance).
+# Run locally before pushing; also invoked by CI.
+# Exit code 0 = all pass. Non-zero = failure.
 
 set -e
 # Enable recursive glob expansion (**) so we can hand node a real

@@ -1,0 +1,11 @@
+{
+  "baseUrl": "https://lm.example.test",
+  "eventSlug": "fictional-event-2026-1",
+  "capturedAt": "2026-06-07T00:00:00.000Z",
+  "characterCount": 3,
+  "registrationCount": 2,
+  "sha256OfExport": "0000000000000000000000000000000000000000000000000000000000000000",
+  "scrubbed": true,
+  "seed": "task-006-organizer-character-by-email",
+  "_note": "Hand-crafted fixture (not from a real LM capture) pinned to Task 006. Reproduces Hypothesis A: organizer is NOT in registration.csv but has a character whose `player_email` matches their RoleKeeper sign-in email. Pre-fix the join would return zero characters; post-fix the organizer email-mirror fallback resolves uuid-cassandra. See `playerCharacters.test.ts` 'Task 006 regression' cases."
+}

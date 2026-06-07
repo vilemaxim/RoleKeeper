@@ -1,0 +1,23 @@
+{
+  "1": {
+    "number": 1,
+    "name": "Alice Hero",
+    "uuid": "uuid-alice",
+    "teaser": "A brave hero.",
+    "player_email": "player-alice@example.test"
+  },
+  "2": {
+    "number": 2,
+    "name": "Bob Scout",
+    "uuid": "uuid-bob",
+    "teaser": "A cunning scout.",
+    "player_email": "player-bob@example.test"
+  },
+  "7": {
+    "number": 7,
+    "name": "Cassandra Quartermaster",
+    "uuid": "uuid-cassandra",
+    "teaser": "Keeps the inventory.",
+    "player_email": "organizer-svc@example.test"
+  }
+}

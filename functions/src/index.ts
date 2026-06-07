@@ -1,6 +1,5 @@
 /**
  * RoleKeeper Cloud Functions
- * See project-documentation/api-contracts.md for function specifications.
  */
 
 import * as crypto from "crypto";
