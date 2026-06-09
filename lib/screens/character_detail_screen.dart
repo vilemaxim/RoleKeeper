@@ -1,13 +1,29 @@
 import 'package:flutter/material.dart';
 
 import '../models/character.dart';
+import '../models/character_stats.dart';
+import '../services/character_stats_repository.dart';
 import '../services/characters_repository.dart';
+import '../utils/error_reporting.dart';
+import '../utils/relative_time.dart';
 
-/// Character detail view. MVP: name, description placeholder.
+/// Character detail view. Renders LM-synced stats sections (Presentation,
+/// Custom Fields, Abilities) when the character originated from
+/// LarpManager; otherwise keeps the existing manual placeholder.
 class CharacterDetailScreen extends StatelessWidget {
-  const CharacterDetailScreen({super.key, required this.character});
+  const CharacterDetailScreen({
+    super.key,
+    required this.character,
+    CharacterStatsRepository? statsRepository,
+  }) : _injectedStatsRepository = statsRepository;
 
   final Character character;
+  final CharacterStatsRepository? _injectedStatsRepository;
+
+  CharacterStatsRepository get _statsRepository =>
+      _injectedStatsRepository ?? CharacterStatsRepository();
+
+  bool get _isLarpManagerSynced => character.larpManagerUuid != null;
 
   @override
   Widget build(BuildContext context) {
@@ -39,57 +55,14 @@ class CharacterDetailScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Chip(
-              label: Text('ID: ${character.shortId}'),
-              avatar: const Icon(Icons.badge, size: 18),
-            ),
-            const SizedBox(height: 16),
-            if (character.pronouns != null) ...[
-              Text(
-                character.pronouns!,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 16),
-            ],
-            if (character.description != null && character.description!.isNotEmpty) ...[
-              Text(
-                'Description',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(character.description!),
-              const SizedBox(height: 24),
-            ],
-            if (character.gameSystemName != null) ...[
-              Chip(
-                label: Text(character.gameSystemName!),
-                avatar: const Icon(Icons.sports_esports, size: 18),
-              ),
-              const SizedBox(height: 24),
-            ],
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Attributes',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Add attributes, abilities, and inventory in a future update.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            _IdentityBlock(character: character),
+            if (_isLarpManagerSynced)
+              _LarpManagerStatsSection(
+                characterUuid: character.larpManagerUuid!,
+                repository: _statsRepository,
+              )
+            else
+              const _ManualPlaceholderCard(),
           ],
         ),
       ),
@@ -120,5 +93,347 @@ class CharacterDetailScreen extends StatelessWidget {
       await CharactersRepository().archive(character.id);
       if (context.mounted) Navigator.pop(context);
     }
+  }
+}
+
+class _IdentityBlock extends StatelessWidget {
+  const _IdentityBlock({required this.character});
+
+  final Character character;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Chip(
+          label: Text('ID: ${character.shortId}'),
+          avatar: const Icon(Icons.badge, size: 18),
+        ),
+        const SizedBox(height: 16),
+        if (character.pronouns != null) ...[
+          Text(
+            character.pronouns!,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (character.description != null &&
+            character.description!.isNotEmpty) ...[
+          Text(
+            'Description',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(character.description!),
+          const SizedBox(height: 24),
+        ],
+        if (character.gameSystemName != null) ...[
+          Chip(
+            label: Text(character.gameSystemName!),
+            avatar: const Icon(Icons.sports_esports, size: 18),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ],
+    );
+  }
+}
+
+class _ManualPlaceholderCard extends StatelessWidget {
+  const _ManualPlaceholderCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Attributes',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add attributes, abilities, and inventory in a future update.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LarpManagerStatsSection extends StatelessWidget {
+  const _LarpManagerStatsSection({
+    required this.characterUuid,
+    required this.repository,
+  });
+
+  final String characterUuid;
+  final CharacterStatsRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<CharacterStats?>(
+      stream: repository.watchStats(characterUuid: characterUuid),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          final report = reportAppError(
+            'CharacterDetailScreen.stats',
+            snapshot.error!,
+            snapshot.stackTrace,
+          );
+          return Text("Couldn't load stats: ${report.userMessage}");
+        }
+        if (!snapshot.hasData && snapshot.connectionState != ConnectionState.active) {
+          return const Text('Synced: pending');
+        }
+        final stats = snapshot.data;
+        if (stats == null) {
+          return const Text(
+            'Stats not synced yet — ask your organizer to run a sync.',
+          );
+        }
+        return _StatsBody(stats: stats);
+      },
+    );
+  }
+}
+
+class _StatsBody extends StatelessWidget {
+  const _StatsBody({required this.stats});
+
+  final CharacterStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    // Presentation section is rendered when the export carries narrative
+    // content (teaser or long-body). The bare number badge alone is not
+    // enough — name+number+uuid-only exports show no section headers per
+    // the task spec.
+    final hasPresentation =
+        stats.teaser != null || stats.presentation != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasPresentation)
+          _Section(
+            label: 'Presentation',
+            child: _PresentationBlock(stats: stats),
+          ),
+        if (stats.customFields.isNotEmpty)
+          _Section(
+            label: 'Custom Fields',
+            child: _CustomFieldsBlock(fields: stats.customFields),
+          ),
+        if (stats.abilities.isNotEmpty)
+          _Section(
+            label: 'Abilities',
+            child: _AbilitiesBlock(abilities: stats.abilities),
+          ),
+        _LastSyncedFooter(lastSyncedAt: stats.lastSyncedAt),
+      ],
+    );
+  }
+}
+
+/// Section header + body + trailing gap. Used by Presentation / Custom
+/// Fields / Abilities so the three blocks share identical spacing.
+class _Section extends StatelessWidget {
+  const _Section({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        child,
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+class _PresentationBlock extends StatelessWidget {
+  const _PresentationBlock({required this.stats});
+
+  final CharacterStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (stats.number != null) ...[
+          Chip(label: Text('#${stats.number}')),
+          const SizedBox(height: 8),
+        ],
+        if (stats.teaser != null) ...[
+          Text(stats.teaser!),
+          const SizedBox(height: 8),
+        ],
+        if (stats.presentation != null) Text(stats.presentation!),
+      ],
+    );
+  }
+}
+
+class _CustomFieldsBlock extends StatelessWidget {
+  const _CustomFieldsBlock({required this.fields});
+
+  final List<CustomField> fields;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final f in fields) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    f.label,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(f.value),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AbilitiesBlock extends StatelessWidget {
+  const _AbilitiesBlock({required this.abilities});
+
+  final List<Ability> abilities;
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = _groupByType(abilities);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final entry in groups.entries) ...[
+          if (entry.key != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              entry.key!,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+          ],
+          for (final a in entry.value) _AbilityTile(ability: a),
+          const SizedBox(height: 4),
+        ],
+      ],
+    );
+  }
+
+  /// Returns the abilities keyed by type. When NO ability has a type, the
+  /// single bucket key is null and the abilities render flat.
+  Map<String?, List<Ability>> _groupByType(List<Ability> items) {
+    final hasAnyType = items.any((a) => a.type != null);
+    if (!hasAnyType) {
+      return {null: items};
+    }
+    final out = <String?, List<Ability>>{};
+    for (final a in items) {
+      out.putIfAbsent(a.type, () => <Ability>[]).add(a);
+    }
+    return out;
+  }
+}
+
+class _AbilityTile extends StatelessWidget {
+  const _AbilityTile({required this.ability});
+
+  final Ability ability;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                ability.name,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              if (ability.cost != null) ...[
+                const SizedBox(width: 8),
+                Chip(
+                  label: Text('Cost ${ability.cost}'),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ],
+          ),
+          if (ability.description != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                ability.description!,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LastSyncedFooter extends StatelessWidget {
+  const _LastSyncedFooter({required this.lastSyncedAt});
+
+  final DateTime? lastSyncedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = lastSyncedAt == null
+        ? 'Synced: pending'
+        : 'Last synced ${relativeTime(lastSyncedAt!)}';
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      ),
+    );
   }
 }

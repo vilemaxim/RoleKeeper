@@ -1,0 +1,8 @@
+{
+  "source": "https://sovereignscrolls.larpmanager.com/crucible/character/oxe9sb0w02ig/",
+  "capturedAt": "2026-06-08T00:00:00.000Z",
+  "scrubbed": true,
+  "seed": "task-008-crucible-character-sheet",
+  "characterSheetUuids": ["oxe9sb0w02ig"],
+  "_note": "Heldrek character sheet captured for Task 008. Source HTML pulled from the live SovereignScrolls Crucible event and scrubbed via scrubCharacterSheetHtml(seed='task-008-crucible-character-sheet'). All emails, LM user uuids (pop=, owner_uuid=, /public/<uuid>/), and human display names are synthetic placeholders. The character uuid oxe9sb0w02ig is preserved intact (used by the stable fixture filename + parser tests). Re-capture by dropping a fresh raw HTML at functions/test/fixtures/crucible-character-sheet-unscrubbed/character-sheet-oxe9sb0w02ig.html and re-running the scrubber with the same seed."
+}

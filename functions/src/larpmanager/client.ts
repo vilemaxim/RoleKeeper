@@ -58,6 +58,39 @@ async function fetchJson<T>(
 }
 
 /**
+ * Shared GET helper for LM endpoints that return rendered HTML (rather
+ * than the JSON `/export/…` endpoints). Follows redirects so callers
+ * see the final URL after any login-bounce, and throws
+ * `LarpManagerHttpError` on non-2xx so the call site never has to
+ * branch on `res.ok` itself. `errorLabel` is the human-readable
+ * subject (e.g. "Manage registrations page", "Character sheet") used
+ * to prefix the thrown error message.
+ */
+async function fetchAuthenticatedHtmlPage(
+  url: string,
+  jar: Map<string, string>,
+  errorLabel: string
+): Promise<{ html: string; finalUrl: string }> {
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      Cookie: cookieMapToHeader(jar),
+      "User-Agent": "RoleKeeper-LarpManagerSync/1.0",
+    },
+    redirect: "follow",
+  });
+  const html = await res.text();
+  if (!res.ok) {
+    throw new LarpManagerHttpError(
+      `${errorLabel} HTTP ${res.status} at ${url}: ${html.slice(0, 200)}`,
+      res.status,
+      url
+    );
+  }
+  return { html, finalUrl: res.url || url };
+}
+
+/**
  * Obtain a session cookie jar: either from explicit sessionId or username/password login.
  */
 export async function establishLarpManagerSession(
@@ -210,6 +243,55 @@ export async function fetchCharacterAbilitiesJson(
   const url = `${base}/${slug}/character/${characterUuid}/abilities/json/`;
   const { json } = await fetchJson<unknown>(url, cookieMapToHeader(jar));
   return json;
+}
+
+/**
+ * Fetch the HTML version of LarpManager's manage/registrations page (the
+ * one the operator sees in a browser, not the CSV-in-a-ZIP that the
+ * registration export download returns). This is the canonical
+ * `(email, lm_user_uuid, character_uuid)` join table — and unlike the
+ * CSV, it includes organizers / staff who registered without picking a
+ * character. Used by `syncLarpManagerCharactersByEmail` for Task 006.
+ *
+ * Returns the raw HTML plus the final URL after redirects so callers can
+ * detect "redirected to login" without re-fetching.
+ */
+export async function fetchRegistrationsManagementHtml(
+  config: LarpManagerSyncConfig,
+  jar: Map<string, string>
+): Promise<{ html: string; finalUrl: string }> {
+  const base = normalizeBaseUrl(config.baseUrl);
+  const slug = config.eventSlug.replace(/^\/+|\/+$/g, "");
+  const url = `${base}/${slug}/manage/registrations/`;
+  return fetchAuthenticatedHtmlPage(url, jar, "Manage registrations page");
+}
+
+/**
+ * Fetch the HTML version of LarpManager's per-character sheet at
+ * `/{event_slug}/character/{characterUuid}/`. This is the page LM
+ * renders for a logged-in user viewing one character — it carries the
+ * rich gameplay stats (Player, Status, Race, Cultivation Tier,
+ * HP/Essence, Total/Effective affinities, Iron DR, etc.) that the
+ * bulk `/export/char/` JSON does not include.
+ *
+ * Used by:
+ *   - `scripts/capture-lm-fixture.ts` (via the optional
+ *     `--character-uuid` flag) to capture fixtures.
+ *   - The Task 009 sync wiring (not in scope for this task) to mirror
+ *     each character's sheet into Firestore.
+ *
+ * Throws `LarpManagerHttpError` on non-2xx responses.
+ */
+export async function fetchCharacterSheetHtml(
+  config: LarpManagerSyncConfig,
+  jar: Map<string, string>,
+  characterUuid: string
+): Promise<{ html: string; finalUrl: string }> {
+  const base = normalizeBaseUrl(config.baseUrl);
+  const slug = config.eventSlug.replace(/^\/+|\/+$/g, "");
+  const uuid = characterUuid.replace(/^\/+|\/+$/g, "");
+  const url = `${base}/${slug}/character/${uuid}/`;
+  return fetchAuthenticatedHtmlPage(url, jar, "Character sheet");
 }
 
 /**
