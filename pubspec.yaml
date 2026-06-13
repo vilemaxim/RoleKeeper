@@ -66,6 +66,13 @@ dev_dependencies:
   fake_cloud_firestore: ^3.1.0
   mocktail: ^1.0.4
 
+  # Transitive deps surfaced explicitly so test files can import them
+  # without tripping the `depend_on_referenced_packages` lint. Used by
+  # widget tests that mock the url_launcher platform interface
+  # (e.g. test/screens/character_detail_screen_sheet_body_test.dart).
+  url_launcher_platform_interface: ^2.3.2
+  plugin_platform_interface: ^2.1.8
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

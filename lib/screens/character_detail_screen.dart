@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/character.dart';
 import '../models/character_stats.dart';
@@ -333,6 +334,20 @@ class _StatsBody extends StatelessWidget {
     // fallback continues to render unchanged.
     final hasSheet = stats.sheetSections.isNotEmpty;
 
+    // Task 015: surface the structured `sheet.body` projection
+    // (Experience points / ability groups / Inventories) BETWEEN the
+    // Custom Fields fallback and the JSON-fed `_AbilitiesBlock`. The
+    // body is also nullable: legacy mirror docs that pre-date Task 014
+    // (and any character whose LM HTML had no body block) collapse it
+    // to null and we render exactly the pre-Task-015 UI. Per user
+    // decision the JSON `_AbilitiesBlock` keeps rendering even when
+    // the new ability groups are present — two passes of abilities is
+    // the explicit price of validating the sheet parser on real data.
+    final body = stats.sheetBody;
+    final xp = body?.experiencePoints;
+    final groups = body?.abilityGroups ?? const <SheetAbilityGroup>[];
+    final inventories = body?.inventories ?? const <SheetInventory>[];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -346,6 +361,18 @@ class _StatsBody extends StatelessWidget {
           _Section(
             label: 'Custom Fields',
             child: _CustomFieldsBlock(fields: stats.customFields),
+          ),
+        if (xp != null && xp.isNotEmpty)
+          _Section(label: 'Experience points', child: Text(xp)),
+        for (final group in groups)
+          _Section(
+            label: group.label,
+            child: _SheetAbilityList(abilities: group.abilities),
+          ),
+        if (inventories.isNotEmpty)
+          _Section(
+            label: 'Inventories',
+            child: _SheetInventoriesBlock(inventories: inventories),
           ),
         if (stats.abilities.isNotEmpty)
           _Section(
@@ -400,8 +427,10 @@ class _SheetSectionBody extends StatelessWidget {
   }
 }
 
-/// Section header + body + trailing gap. Used by Presentation / Custom
-/// Fields / Abilities so the three blocks share identical spacing.
+/// Section header + body + trailing gap. Shared by every header'd
+/// block in `_StatsBody` (sheet panel sections, Presentation, Custom
+/// Fields, Experience points, sheet ability groups, Inventories,
+/// Abilities) so spacing is identical between them.
 class _Section extends StatelessWidget {
   const _Section({required this.label, required this.child});
 
@@ -575,6 +604,153 @@ class _AbilityTile extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Task 015: ability list inside one `_Section` per
+/// [SheetAbilityGroup]. Visual match for [_AbilityTile] — a row with
+/// the name and an optional `Cost <n>` chip, plus an optional
+/// description underneath. Per the user decision we DON'T mark
+/// "Helper Abilities" prereq markers visually; they render verbatim
+/// like every other group's rows.
+class _SheetAbilityList extends StatelessWidget {
+  const _SheetAbilityList({required this.abilities});
+
+  final List<SheetAbility> abilities;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final a in abilities) _SheetAbilityTile(ability: a),
+      ],
+    );
+  }
+}
+
+class _SheetAbilityTile extends StatelessWidget {
+  const _SheetAbilityTile({required this.ability});
+
+  final SheetAbility ability;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                ability.name,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              if (ability.cost != null) ...[
+                const SizedBox(width: 8),
+                Chip(
+                  label: Text('Cost ${ability.cost}'),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ],
+          ),
+          if (ability.description != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                ability.description!,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Task 015: stack of one [Card] per [SheetInventory]. Each card has
+/// the inventory title (`titleSmall`), each balance as a
+/// [_LabelValueRow] (so the two-column look matches Custom Fields and
+/// the sheet panel), and — when `detailsUrl` is non-null — a trailing
+/// "View on LarpManager" `TextButton.icon` that opens the URL in the
+/// system browser.
+class _SheetInventoriesBlock extends StatelessWidget {
+  const _SheetInventoriesBlock({required this.inventories});
+
+  final List<SheetInventory> inventories;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final inv in inventories) _SheetInventoryCard(inventory: inv),
+      ],
+    );
+  }
+}
+
+class _SheetInventoryCard extends StatelessWidget {
+  const _SheetInventoryCard({required this.inventory});
+
+  final SheetInventory inventory;
+
+  Future<void> _open(BuildContext context, String url) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String? errorMessage;
+    try {
+      final ok = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok) {
+        errorMessage = 'Could not open inventory link.';
+      }
+    } catch (e, st) {
+      final report =
+          reportAppError('CharacterDetailScreen.openInventory', e, st);
+      errorMessage = report.userMessage;
+    }
+    if (errorMessage != null) {
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = inventory.detailsUrl;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              inventory.title,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            for (final b in inventory.balances)
+              _LabelValueRow(label: b.label, value: b.value),
+            if (url != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _open(context, url),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('View on LarpManager'),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
