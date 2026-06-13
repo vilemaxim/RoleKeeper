@@ -19,7 +19,10 @@ import {
   CharacterSheetParseError,
   parseCharacterSheetHtml,
 } from "./characterSheet";
-import type { CharacterSheet } from "./characterSheet";
+import type {
+  CharacterSheet,
+  CharacterSheetBody,
+} from "./characterSheet";
 
 // Compiled tests live under `functions/lib/larpmanager/`; fixtures are at
 // `functions/test/fixtures/`. Two `..` hops get us to `functions/`, then
@@ -48,12 +51,19 @@ function statRow(label: string, valueHtml: string): string {
 }
 
 /** Minimal but representative character-sheet HTML container, modelled
- * on the real LM template's nesting. */
+ * on the real LM template's nesting.
+ *
+ * Task 014: `body` (optional) is appended as a sibling `<div class="sheet">`
+ * INSIDE the `.character` container so the parser can locate it the same
+ * way it does in the real LM template (the sheet block sits next to
+ * `.presentation` under `.character`).
+ */
 function buildSyntheticSheet(opts: {
   rows?: string;
   teaser?: string;
   presentation?: string;
   trailing?: string;
+  body?: string;
 }): string {
   const rows = opts.rows ?? "";
   const teaser =
@@ -65,6 +75,9 @@ function buildSyntheticSheet(opts: {
       ? `<h2 class="c">Presentation</h2>\n${opts.presentation}`
       : "";
   const trailing = opts.trailing ?? "";
+  const body = opts.body !== undefined
+    ? `<div class="sheet">${opts.body}</div>`
+    : "";
   return `<!DOCTYPE html>
 <html><head><title>Char</title></head>
 <body>
@@ -75,9 +88,29 @@ function buildSyntheticSheet(opts: {
         ${teaser || presentation}
         ${trailing}
       </div>
+      ${body}
     </div>
   </div>
 </body></html>`;
+}
+
+/** Build the `<table class="mob abilities">` row LM emits for one ability. */
+function abilityRow(nameInsideH4: string, descriptionInsideTd: string): string {
+  return `
+    <tbody><tr>
+      <th>
+        <h4>
+          ${nameInsideH4}
+        </h4>
+      </th>
+      <td>${descriptionInsideTd}</td>
+    </tr></tbody>`;
+}
+
+/** Wrap one or more `abilityRow(...)` strings in the LM ability table
+ *  header LM emits inside an `<h3>` group. */
+function abilityGroup(label: string, rowsHtml: string): string {
+  return `<h3>${label}</h3>\n<table class="mob abilities">${rowsHtml}</table>`;
 }
 
 // --- Malformed-HTML guard --------------------------------------------------
@@ -408,5 +441,525 @@ test(
       allValues.every((v) => !/Fire Mage/.test(v)),
       "teaser body must not also appear inside a row value"
     );
+  }
+);
+
+// ==========================================================================
+// Task 014: <div class="sheet"> body parsing — Experience points, the
+// Abilities tree, and Inventories. Additive to the Task 008 surface; all
+// tests above MUST still pass unchanged (the new `body` field is optional
+// on `CharacterSheet`, and `sections[]` / `teaserHtml` / `presentationHtml`
+// shapes are unchanged).
+// ==========================================================================
+
+// --- Experience points ----------------------------------------------------
+
+test(
+  "parseCharacterSheetHtml (Task 014): <h2>Experience points</h2> followed " +
+    "by inline prose → body.experiencePoints is that prose with whitespace " +
+    "collapsed and inline tags stripped",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        "<h2>Experience points</h2>" +
+        "<p>You have   <strong>5</strong>  unspent XP.</p>" +
+        "<h2>Abilities</h2>",
+    });
+    const sheet: CharacterSheet = parseCharacterSheetHtml(html);
+    assert.ok(sheet.body, "body must be populated");
+    assert.equal(
+      sheet.body!.experiencePoints,
+      "You have 5 unspent XP.",
+      "inline tags stripped and whitespace collapsed"
+    );
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): <h2>Experience points</h2> with " +
+    "only whitespace before the next <h2> → experiencePoints is undefined",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body: "<h2>Experience points</h2>\n   \n\n   \n<h2>Abilities</h2>",
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    assert.ok(sheet.body, "body must be populated even with empty XP");
+    assert.equal(
+      sheet.body!.experiencePoints,
+      undefined,
+      "an empty Experience points block must NOT surface the empty string"
+    );
+  }
+);
+
+// --- Abilities tree -------------------------------------------------------
+
+test(
+  "parseCharacterSheetHtml (Task 014): <h2>Abilities</h2> followed by two " +
+    "<h3> groups (two rows each) → body.abilityGroups has length 2, labels " +
+    "verbatim, names with trailing '(cost)' stripped, cost is the digit " +
+    "string, description is the <td> flat plain text",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        "<h2>Abilities</h2>" +
+        abilityGroup(
+          "Shadow Affinity Skills",
+          abilityRow(
+            "Flashback (99)",
+            "<p><strong>Frequency:</strong> Heist | <strong>Delivery:</strong> Self</p>"
+          ) +
+            abilityRow(
+              "Shadow Step (3)",
+              "<p>Teleport one move-stride into  shadow.</p>"
+            )
+        ) +
+        abilityGroup(
+          "Iron Affinity",
+          abilityRow("Shadow 1 [Iron] (2)", "") +
+            abilityRow(
+              "Body 6 [Iron] (12)",
+              "<p>Iron-clad heart.</p>"
+            )
+        ),
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    assert.ok(sheet.body, "body must be populated");
+    assert.equal(sheet.body!.abilityGroups.length, 2);
+    assert.deepEqual(
+      sheet.body!.abilityGroups.map((g) => g.label),
+      ["Shadow Affinity Skills", "Iron Affinity"],
+      "group labels verbatim and in source-HTML order"
+    );
+
+    const shadow = sheet.body!.abilityGroups[0]!;
+    assert.equal(shadow.abilities.length, 2);
+    assert.equal(shadow.abilities[0]!.name, "Flashback");
+    assert.equal(shadow.abilities[0]!.cost, "99");
+    assert.equal(
+      shadow.abilities[0]!.description,
+      "Frequency: Heist | Delivery: Self",
+      "description is the <td> contents with inline tags stripped and " +
+        "whitespace collapsed"
+    );
+    assert.equal(shadow.abilities[1]!.name, "Shadow Step");
+    assert.equal(shadow.abilities[1]!.cost, "3");
+    assert.equal(
+      shadow.abilities[1]!.description,
+      "Teleport one move-stride into shadow."
+    );
+
+    const iron = sheet.body!.abilityGroups[1]!;
+    assert.equal(iron.abilities.length, 2);
+    assert.equal(iron.abilities[0]!.name, "Shadow 1 [Iron]");
+    assert.equal(iron.abilities[0]!.cost, "2");
+    assert.equal(
+      iron.abilities[0]!.description,
+      undefined,
+      "an empty <td> must yield description: undefined, NOT empty string"
+    );
+    assert.equal(iron.abilities[1]!.name, "Body 6 [Iron]");
+    assert.equal(iron.abilities[1]!.cost, "12");
+    assert.equal(iron.abilities[1]!.description, "Iron-clad heart.");
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): an ability <h4> with NO trailing " +
+    "'(cost)' paren → cost is undefined; name is the full <h4> text",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        "<h2>Abilities</h2>" +
+        abilityGroup(
+          "Common Skills",
+          abilityRow("Common Skill Without Cost", "<p>A description.</p>")
+        ),
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    const groups = sheet.body!.abilityGroups;
+    assert.equal(groups.length, 1);
+    const ab = groups[0]!.abilities[0]!;
+    assert.equal(ab.name, "Common Skill Without Cost");
+    assert.equal(ab.cost, undefined);
+    assert.equal(ab.description, "A description.");
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): an ability <td> that is empty / " +
+    "whitespace only → description is undefined (NOT the empty string)",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        "<h2>Abilities</h2>" +
+        abilityGroup(
+          "Race Skills",
+          abilityRow("Empty (1)", "") +
+            abilityRow("Whitespace (2)", "   \n   \t   ")
+        ),
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    const abs = sheet.body!.abilityGroups[0]!.abilities;
+    assert.equal(abs.length, 2);
+    assert.equal(abs[0]!.description, undefined);
+    assert.equal(abs[1]!.description, undefined);
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): Helper Abilities rows containing " +
+    "'Used for prereq. Please ignore.' are surfaced VERBATIM — regression " +
+    "guard against accidental filtering of the prereq markers",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        "<h2>Abilities</h2>" +
+        abilityGroup(
+          "Helper Abilities",
+          abilityRow(
+            "Metal Affinity 3+ (999)",
+            "<p>Used for prereq. Please ignore.</p>"
+          ) +
+            abilityRow(
+              "Silver Tier (0)",
+              "<p>Silver Tier Cultivation</p>"
+            )
+        ),
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    const helpers = sheet.body!.abilityGroups[0]!.abilities;
+    assert.equal(helpers.length, 2, "BOTH helper rows must surface");
+    assert.equal(helpers[0]!.name, "Metal Affinity 3+");
+    assert.equal(helpers[0]!.cost, "999");
+    assert.equal(
+      helpers[0]!.description,
+      "Used for prereq. Please ignore.",
+      "Used-for-prereq markers MUST NOT be filtered"
+    );
+    assert.equal(helpers[1]!.name, "Silver Tier");
+    assert.equal(helpers[1]!.cost, "0");
+    assert.equal(helpers[1]!.description, "Silver Tier Cultivation");
+  }
+);
+
+// --- Inventories ----------------------------------------------------------
+
+test(
+  "parseCharacterSheetHtml (Task 014): <h3>Inventories</h3> with one " +
+    "<div class=\"inventory-card\"> (title, one balance, View Details btn) " +
+    "→ body.inventories[0] has matching title / balances / detailsUrl",
+  () => {
+    const url =
+      "https://lm.example/crucible/manage/ci/inventory/g7j03os5vzhj/view/";
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        '<div class="character-inventories">' +
+        "<h3>Inventories</h3>" +
+        '<div class="inventory-cards">' +
+        '<div class="inventory-card">' +
+        "<h4>Heldrek's Personal Storage</h4>" +
+        '<ul class="pool-balances"><li>Monster Cores: 0</li></ul>' +
+        `<a href="${url}" class="btn">View Details</a>` +
+        "</div>" +
+        "</div>" +
+        "</div>",
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    assert.equal(sheet.body!.inventories.length, 1);
+    const inv = sheet.body!.inventories[0]!;
+    assert.equal(inv.title, "Heldrek's Personal Storage");
+    assert.deepEqual(inv.balances, [{ label: "Monster Cores", value: "0" }]);
+    assert.equal(inv.detailsUrl, url);
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): <li> rows in pool-balances with no " +
+    "':' separator are DROPPED from balances[]; the surviving rows split on " +
+    "the first ':' with both sides trimmed",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        '<div class="character-inventories">' +
+        "<h3>Inventories</h3>" +
+        '<div class="inventory-card">' +
+        "<h4>Stash</h4>" +
+        '<ul class="pool-balances">' +
+        "<li>Monster Cores: 0</li>" +
+        "<li>garbled row with no separator</li>" +
+        "<li>  Spaces Around  :   42  </li>" +
+        "<li>Multi:Colon:Value</li>" +
+        "</ul>" +
+        "</div>" +
+        "</div>",
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    const inv = sheet.body!.inventories[0]!;
+    assert.deepEqual(
+      inv.balances,
+      [
+        { label: "Monster Cores", value: "0" },
+        { label: "Spaces Around", value: "42" },
+        { label: "Multi", value: "Colon:Value" },
+      ],
+      "drop the row with no ':' and split surviving rows on the FIRST ':'"
+    );
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): an inventory-card with NO " +
+    "<a class=\"btn\"> button → detailsUrl is undefined",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1"),
+      body:
+        '<div class="character-inventories">' +
+        "<h3>Inventories</h3>" +
+        '<div class="inventory-card">' +
+        "<h4>No Button Stash</h4>" +
+        '<ul class="pool-balances"><li>Coins: 5</li></ul>' +
+        "</div>" +
+        "</div>",
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    const inv = sheet.body!.inventories[0]!;
+    assert.equal(inv.title, "No Button Stash");
+    assert.equal(inv.detailsUrl, undefined);
+    assert.deepEqual(inv.balances, [{ label: "Coins", value: "5" }]);
+  }
+);
+
+// --- Missing body block ---------------------------------------------------
+
+test(
+  "parseCharacterSheetHtml (Task 014): a sheet HTML with NO " +
+    "<div class=\"sheet\"> block (just top stats + presentation) → " +
+    "body is undefined; sections[] still populates normally",
+  () => {
+    const html = buildSyntheticSheet({
+      rows: statRow("Player", "Player 1") + statRow("Race", "Human"),
+      teaser: "<p>Fire Mage</p>",
+      // No body opts → no <div class="sheet"> emitted.
+    });
+    const sheet = parseCharacterSheetHtml(html);
+    assert.equal(
+      sheet.body,
+      undefined,
+      "the optional body field must be omitted entirely when LM didn't " +
+        "emit the sheet block"
+    );
+    assert.ok(
+      sheet.sections.length >= 1 && sheet.sections[0]!.rows.length >= 2,
+      "existing sections[] parsing must NOT regress when body is absent"
+    );
+    assert.equal(sheet.teaserHtml, "<p>Fire Mage</p>");
+  }
+);
+
+// --- Regression guard: Task 008 surface stays unchanged when body present -
+
+test(
+  "parseCharacterSheetHtml (Task 014): adding a <div class=\"sheet\"> body " +
+    "block does NOT cause any existing sections[] rows to disappear or " +
+    "reorder (regression guard for Task 008 / 009 surface)",
+  () => {
+    const rows =
+      statRow("Player", "Player 1") +
+      statRow("Status", "Proposed") +
+      statRow("Race", "Human");
+
+    const withoutBody = parseCharacterSheetHtml(
+      buildSyntheticSheet({ rows })
+    );
+    const withBody = parseCharacterSheetHtml(
+      buildSyntheticSheet({
+        rows,
+        body:
+          "<h2>Abilities</h2>" +
+          abilityGroup(
+            "Common Skills",
+            abilityRow("Block (1)", "<p>Block one attack.</p>")
+          ),
+      })
+    );
+
+    assert.deepEqual(
+      withBody.sections.map((s) => ({
+        label: s.label,
+        rows: s.rows.map((r) => [r.label, r.value]),
+      })),
+      withoutBody.sections.map((s) => ({
+        label: s.label,
+        rows: s.rows.map((r) => [r.label, r.value]),
+      })),
+      "sections[] shape (labels and row order) must be IDENTICAL whether " +
+        "or not the body block is present"
+    );
+    assert.ok(withBody.body, "body still gets populated");
+  }
+);
+
+// --- Fixture-anchored (committed Heldrek HTML) ----------------------------
+
+test(
+  "parseCharacterSheetHtml (Task 014): committed Heldrek fixture — " +
+    "body.abilityGroups has EXACTLY these 10 labels in this order, " +
+    "matching the LM page top-to-bottom",
+  () => {
+    if (!fs.existsSync(FIXTURE_PATH)) {
+      throw new Error(
+        `Heldrek fixture missing at ${FIXTURE_PATH}. ` +
+          "Task 008 committed this file; re-run capture-lm-fixture if needed."
+      );
+    }
+    const html = fs.readFileSync(FIXTURE_PATH, "utf8");
+    const sheet = parseCharacterSheetHtml(html);
+    assert.ok(sheet.body, "fixture must yield a populated body");
+    const labels = sheet.body!.abilityGroups.map((g) => g.label);
+    assert.deepEqual(
+      labels,
+      [
+        "Shadow Affinity Skills",
+        "Iron Affinity",
+        "Common Skills",
+        "Helper Abilities",
+        "Silver Affinity",
+        "Attack Affinity Skills",
+        "Race Skills",
+        "Body Affinity Skills",
+        "Fire Affinity Skills",
+        "Extra Hit Points",
+      ],
+      "abilityGroups must match the LM source-HTML order verbatim — no " +
+        "alphabetization, no humanization, no drops"
+    );
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): committed Heldrek fixture — first " +
+    "ability of 'Shadow Affinity Skills' is " +
+    "{name: 'Flashback', cost: '99', description: <starts with 'Frequency: Heist'>}",
+  () => {
+    if (!fs.existsSync(FIXTURE_PATH)) {
+      throw new Error(`Heldrek fixture missing at ${FIXTURE_PATH}.`);
+    }
+    const html = fs.readFileSync(FIXTURE_PATH, "utf8");
+    const sheet = parseCharacterSheetHtml(html);
+    const shadow = sheet.body!.abilityGroups.find(
+      (g) => g.label === "Shadow Affinity Skills"
+    );
+    assert.ok(shadow, "Shadow Affinity Skills group must exist");
+    const first = shadow!.abilities[0]!;
+    assert.equal(first.name, "Flashback");
+    assert.equal(first.cost, "99");
+    assert.ok(
+      typeof first.description === "string" &&
+        first.description.startsWith("Frequency: Heist"),
+      `first ability's description must start with "Frequency: Heist", ` +
+        `got: ${JSON.stringify(first.description)}`
+    );
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): committed Heldrek fixture — " +
+    "Helper Abilities has exactly 11 entries; all have a description that " +
+    "either contains 'Used for prereq' or matches 'Silver Tier Cultivation'",
+  () => {
+    if (!fs.existsSync(FIXTURE_PATH)) {
+      throw new Error(`Heldrek fixture missing at ${FIXTURE_PATH}.`);
+    }
+    const html = fs.readFileSync(FIXTURE_PATH, "utf8");
+    const sheet = parseCharacterSheetHtml(html);
+    const helpers = sheet.body!.abilityGroups.find(
+      (g) => g.label === "Helper Abilities"
+    );
+    assert.ok(helpers, "Helper Abilities group must exist");
+    assert.equal(
+      helpers!.abilities.length,
+      11,
+      "exactly 11 helper ability rows (regression-locked to the fixture)"
+    );
+    for (const a of helpers!.abilities) {
+      assert.ok(
+        typeof a.description === "string",
+        `every helper ability must have a description, name=${a.name}`
+      );
+      const d = a.description!;
+      assert.ok(
+        d.includes("Used for prereq") || d === "Silver Tier Cultivation",
+        `helper description must be a prereq marker or Silver Tier ` +
+          `Cultivation, got: ${JSON.stringify(d)} (name=${a.name})`
+      );
+    }
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): committed Heldrek fixture — " +
+    "body.inventories has exactly one entry with the exact title, balances, " +
+    "and detailsUrl shape",
+  () => {
+    if (!fs.existsSync(FIXTURE_PATH)) {
+      throw new Error(`Heldrek fixture missing at ${FIXTURE_PATH}.`);
+    }
+    const html = fs.readFileSync(FIXTURE_PATH, "utf8");
+    const sheet = parseCharacterSheetHtml(html);
+    const invs = sheet.body!.inventories;
+    assert.equal(invs.length, 1);
+    const inv = invs[0]!;
+    assert.equal(inv.title, "Heldrek's Personal Storage");
+    assert.deepEqual(inv.balances, [
+      { label: "Monster Cores", value: "0" },
+    ]);
+    assert.equal(
+      inv.detailsUrl,
+      "https://sovereignscrolls.larpmanager.com/crucible/manage/ci/inventory/g7j03os5vzhj/view/"
+    );
+  }
+);
+
+test(
+  "parseCharacterSheetHtml (Task 014): committed Heldrek fixture — " +
+    "body.experiencePoints is undefined (the fixture's " +
+    "<h2>Experience points</h2> has no body content)",
+  () => {
+    if (!fs.existsSync(FIXTURE_PATH)) {
+      throw new Error(`Heldrek fixture missing at ${FIXTURE_PATH}.`);
+    }
+    const html = fs.readFileSync(FIXTURE_PATH, "utf8");
+    const sheet = parseCharacterSheetHtml(html);
+    assert.equal(
+      sheet.body!.experiencePoints,
+      undefined,
+      "the fixture has an empty Experience points block; the parser must " +
+        "omit experiencePoints rather than surface ''."
+    );
+  }
+);
+
+test(
+  "CharacterSheetBody (Task 014): the type exposes abilityGroups and " +
+    "inventories as arrays — compile-pinned via a literal construction " +
+    "without any casts",
+  () => {
+    const body: CharacterSheetBody = {
+      abilityGroups: [],
+      inventories: [],
+    };
+    assert.ok(Array.isArray(body.abilityGroups));
+    assert.ok(Array.isArray(body.inventories));
+    assert.equal(body.experiencePoints, undefined);
   }
 );

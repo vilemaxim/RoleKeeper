@@ -14,6 +14,7 @@ class CharacterStats {
     this.customFields = const <CustomField>[],
     this.abilities = const <Ability>[],
     this.sheetSections = const <SheetSection>[],
+    this.sheetBody,
     this.lastSyncedAt,
   });
 
@@ -45,6 +46,15 @@ class CharacterStats {
   /// (Task 010). Empty by default for characters whose mirror doc
   /// pre-dates Task 009 or whose sync ran with `fetchDetails: false`.
   final List<SheetSection> sheetSections;
+
+  /// Structured projection of the mirror doc's `sheet.body` payload —
+  /// Experience points, Abilities tree (grouped), and Inventories.
+  /// Populated from Task 014's parser extension; null when the mirror
+  /// doc pre-dates Task 014 or when LM did not emit a sheet block on
+  /// the underlying HTML page. Malformed payloads (non-Map body,
+  /// non-List `abilityGroups`, non-List `inventories`) also collapse
+  /// to null — single source of truth, no half-parsed state.
+  final SheetBody? sheetBody;
 
   /// Server timestamp from the last `runLarpManagerSync` write.
   final DateTime? lastSyncedAt;
@@ -107,6 +117,7 @@ class CharacterStats {
     final abilities = _parseAbilities(data['abilities']);
 
     final sheetSections = _parseSheetSections(data['sheet']);
+    final sheetBody = _parseSheetBody(data['sheet']);
 
     final lastSyncedAt = _asDateTime(data['lastSyncedAt']);
 
@@ -118,6 +129,7 @@ class CharacterStats {
       customFields: List.unmodifiable(customFields),
       abilities: List.unmodifiable(abilities),
       sheetSections: List.unmodifiable(sheetSections),
+      sheetBody: sheetBody,
       lastSyncedAt: lastSyncedAt,
     );
   }
@@ -150,6 +162,80 @@ class CharacterStats {
       out.add(SheetSection(label: label, rows: List.unmodifiable(rows)));
     }
     return out;
+  }
+
+  /// Parses the `sheet.body` payload written by Task 014's parser
+  /// extension (extended `parseCharacterSheetHtml` → unchanged
+  /// `runLarpManagerSync` write-through). Returns null when the
+  /// payload is missing or malformed — `abilityGroups` and
+  /// `inventories` MUST both be Lists for the projection to be
+  /// usable; one bad field collapses the whole projection so the UI
+  /// never has to deal with a half-parsed state. Task 014.
+  static SheetBody? _parseSheetBody(Object? raw) {
+    if (raw is! Map) return null;
+    final body = raw['body'];
+    if (body is! Map) return null;
+
+    final groupsRaw = body['abilityGroups'];
+    final invsRaw = body['inventories'];
+    if (groupsRaw is! List) return null;
+    if (invsRaw is! List) return null;
+
+    final groups = <SheetAbilityGroup>[];
+    for (final g in groupsRaw) {
+      if (g is! Map) continue;
+      final label = _asString(g['label']) ?? '';
+      final absRaw = g['abilities'];
+      final abilities = <SheetAbility>[];
+      if (absRaw is List) {
+        for (final a in absRaw) {
+          if (a is! Map) continue;
+          final name = _asString(a['name']) ?? '';
+          if (name.isEmpty) continue;
+          abilities.add(SheetAbility(
+            name: name,
+            cost: _asScalarString(a['cost']),
+            description: _asNonEmptyString(a['description']),
+          ));
+        }
+      }
+      groups.add(SheetAbilityGroup(
+        label: label,
+        abilities: List.unmodifiable(abilities),
+      ));
+    }
+
+    final inventories = <SheetInventory>[];
+    for (final inv in invsRaw) {
+      if (inv is! Map) continue;
+      final title = _asString(inv['title']) ?? '';
+      if (title.isEmpty) continue;
+      final balRaw = inv['balances'];
+      final balances = <SheetInventoryBalance>[];
+      if (balRaw is List) {
+        for (final b in balRaw) {
+          if (b is! Map) continue;
+          final balLabel = _asString(b['label']) ?? '';
+          final balValue = _asScalarString(b['value']);
+          if (balLabel.isEmpty || balValue == null) continue;
+          balances.add(SheetInventoryBalance(
+            label: balLabel,
+            value: balValue,
+          ));
+        }
+      }
+      inventories.add(SheetInventory(
+        title: title,
+        balances: List.unmodifiable(balances),
+        detailsUrl: _asNonEmptyString(inv['detailsUrl']),
+      ));
+    }
+
+    return SheetBody(
+      experiencePoints: _asNonEmptyString(body['experiencePoints']),
+      abilityGroups: List.unmodifiable(groups),
+      inventories: List.unmodifiable(inventories),
+    );
   }
 
   static List<Ability> _parseAbilities(Object? raw) {
@@ -270,6 +356,88 @@ class SheetSection {
 
   /// Rows in the exact LM source-HTML order.
   final List<SheetRow> rows;
+}
+
+/// Structured projection of the mirror doc's `sheet.body` field —
+/// Task 014's extension of `parseCharacterSheetHtml`. Holds the
+/// three sub-blocks LM renders inside `<div class="sheet">`:
+/// Experience points, the Abilities tree (grouped), and Inventories.
+/// Order is preserved end-to-end so the UI matches the LM page.
+class SheetBody {
+  const SheetBody({
+    this.experiencePoints,
+    this.abilityGroups = const <SheetAbilityGroup>[],
+    this.inventories = const <SheetInventory>[],
+  });
+
+  /// Flat prose under LM's `<h2>Experience points</h2>` heading.
+  /// Null when LM emitted the heading with an empty body (the typical
+  /// case for characters with nothing to spend).
+  final String? experiencePoints;
+
+  /// Ability groups in LM source-HTML order (no humanization, no
+  /// alphabetization).
+  final List<SheetAbilityGroup> abilityGroups;
+
+  /// Inventory cards in LM source-HTML order.
+  final List<SheetInventory> inventories;
+}
+
+/// One `<h3>` group from the LM sheet body — e.g. "Shadow Affinity
+/// Skills" — paired with the abilities in its
+/// `<table class="mob abilities">`. Task 014.
+class SheetAbilityGroup {
+  const SheetAbilityGroup({required this.label, required this.abilities});
+
+  /// Verbatim text of the `<h3>` heading.
+  final String label;
+
+  /// Abilities in source-HTML order.
+  final List<SheetAbility> abilities;
+}
+
+/// One ability row from the LM sheet body's abilities tree. Task 014.
+/// Distinct from [Ability] (which models the per-character abilities
+/// JSON endpoint) because the sheet-body parser carries the trailing
+/// `(NN)` cost out of the `<h4>` and surfaces the description as
+/// flat text.
+class SheetAbility {
+  const SheetAbility({required this.name, this.cost, this.description});
+
+  /// `<h4>` text with trailing `" (NN)"` cost paren stripped.
+  final String name;
+
+  /// Stringified cost — digits from the trailing `" (NN)"` paren.
+  /// Null when the `<h4>` had no cost suffix.
+  final String? cost;
+
+  /// `<td>` description with inline tags stripped and whitespace
+  /// collapsed. Null when the cell is empty.
+  final String? description;
+}
+
+/// One `<div class="inventory-card">` from the LM sheet body. Task 014.
+class SheetInventory {
+  const SheetInventory({
+    required this.title,
+    required this.balances,
+    this.detailsUrl,
+  });
+
+  final String title;
+  final List<SheetInventoryBalance> balances;
+
+  /// `href` of the `<a class="btn">` "View Details" link.
+  /// Null when the card has no such button.
+  final String? detailsUrl;
+}
+
+/// One row of an inventory card's pool-balances list. Task 014.
+class SheetInventoryBalance {
+  const SheetInventoryBalance({required this.label, required this.value});
+
+  final String label;
+  final String value;
 }
 
 /// One ability from `larpManagerMirrorChars/{uuid}.abilities`.

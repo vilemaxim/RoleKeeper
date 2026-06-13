@@ -713,3 +713,101 @@ test(
     );
   }
 );
+
+// --- Task 014: sheet.body write-through ----------------------------------
+//
+// `runLarpManagerSync` already writes `row.sheet = parseCharacterSheetHtml(html)`
+// for each character. Task 014 adds an optional `body` field to that
+// projection. This test pins that when the per-character HTML carries a
+// `<div class="sheet">` block with `<h3>` ability groups, the mirror doc
+// the sync writes has `sheet.body.abilityGroups` non-empty — i.e. the
+// new field rides through `parseCharacterSheetHtml → row.sheet` to
+// Firestore with NO changes to `sync.ts`.
+
+const SHEET_HTML_WITH_BODY = [
+  "<!DOCTYPE html>",
+  "<html><body>",
+  '  <div class="character">',
+  '    <div class="presentation">',
+  '      <div class="first">',
+  '        <div class="go-inline"><b>Player:&nbsp;</b>Player 1</div>',
+  "      </div>",
+  "    </div>",
+  '    <div class="sheet">',
+  "      <h2>Abilities</h2>",
+  "      <h3>Common Skills</h3>",
+  '      <table class="mob abilities">',
+  "        <tbody><tr>",
+  "          <th><h4>Block (1)</h4></th>",
+  "          <td><p>Block one attack.</p></td>",
+  "        </tr></tbody>",
+  "      </table>",
+  "    </div>",
+  "  </div>",
+  "</body></html>",
+].join("\n");
+
+test(
+  "runLarpManagerSync (Task 014): when the per-character HTML carries a " +
+    "<div class=\"sheet\"> block with <h3> ability groups, the mirror doc " +
+    "has sheet.body.abilityGroups non-empty (write-through of the new " +
+    "parser field, no sync.ts code change)",
+  async () => {
+    const uuid = "char00014aaa";
+    const exportJson = {
+      "1": exportEntry({ number: 1, uuid, name: "Heldrek" }),
+    };
+    const { fetch: mockFetch } = makeRouter({
+      exportJson,
+      perCharacter: {
+        [uuid]: {
+          inventory: (u) => jsonResponse({ items: [] }, u),
+          abilities: (u) => jsonResponse({ abilities: [] }, u),
+          sheet: (u) => htmlResponse(SHEET_HTML_WITH_BODY, u),
+        },
+      },
+    });
+
+    const { db, store } = makeFirestoreStub();
+    await withCapturedLogs(async () => {
+      await withMockedFetch(mockFetch, async () => {
+        await runLarpManagerSync(
+          db as unknown as admin.firestore.Firestore,
+          TENANT,
+          CONFIG_DETAILS
+        );
+      });
+    });
+
+    const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
+    assert.ok(doc, "mirror doc must exist");
+    const sheet = doc["sheet"] as
+      | {
+          body?: {
+            abilityGroups?: Array<{ label: string; abilities: unknown[] }>;
+          };
+        }
+      | undefined;
+    assert.ok(sheet, "row.sheet must be populated");
+    assert.ok(
+      sheet!.body,
+      "sheet.body must be populated when the HTML carries a body block"
+    );
+    const groups = sheet!.body!.abilityGroups ?? [];
+    assert.ok(
+      groups.length >= 1,
+      "sheet.body.abilityGroups must be non-empty when the HTML has at " +
+        "least one <h3> group"
+    );
+    assert.equal(
+      groups[0]!.label,
+      "Common Skills",
+      "first group label rides through verbatim"
+    );
+    assert.equal(
+      groups[0]!.abilities.length,
+      1,
+      "the single <h3>'s row count is preserved end-to-end"
+    );
+  }
+);

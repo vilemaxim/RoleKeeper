@@ -526,5 +526,230 @@ void main() {
         );
       },
     );
+
+    // --- Task 014: sheet.body parsing ----------------------------------
+    //
+    // Sync writes `sheet.body` from Task 014's parser. The mirror doc
+    // surfaces it on CharacterStats.sheetBody (a structured projection).
+    // Legacy docs that pre-date Task 014 have no sheet.body → sheetBody
+    // must be null and the rest of the model must be unchanged.
+
+    test(
+      'Task 014: parses sheet.body.abilityGroups into a SheetBody with '
+      'matching group / ability counts; preserves source order; flat '
+      'description rides verbatim',
+      () async {
+        final doc = await seed({
+          'export': {'name': 'Heldrek'},
+          'sheet': {
+            'sections': [
+              {
+                'label': '',
+                'rows': [
+                  {'label': 'Player', 'value': 'Player 1'},
+                ],
+              },
+            ],
+            'body': {
+              'experiencePoints': 'You have 5 unspent XP.',
+              'abilityGroups': [
+                {
+                  'label': 'Shadow Affinity Skills',
+                  'abilities': [
+                    {
+                      'name': 'Flashback',
+                      'cost': '99',
+                      'description': 'Frequency: Heist | Delivery: Self',
+                    },
+                    {
+                      'name': 'Shadow Step',
+                      'cost': '3',
+                      'description': 'Teleport one stride into shadow.',
+                    },
+                  ],
+                },
+                {
+                  'label': 'Iron Affinity',
+                  'abilities': [
+                    {'name': 'Shadow 1 [Iron]', 'cost': '2'},
+                    {
+                      'name': 'Body 6 [Iron]',
+                      'cost': '12',
+                      'description': 'Iron-clad heart.',
+                    },
+                  ],
+                },
+              ],
+              'inventories': [
+                {
+                  'title': "Heldrek's Personal Storage",
+                  'balances': [
+                    {'label': 'Monster Cores', 'value': '0'},
+                  ],
+                  'detailsUrl':
+                      'https://lm.example/crucible/manage/ci/inventory/g7j03os5vzhj/view/',
+                },
+              ],
+            },
+          },
+        });
+
+        final stats = CharacterStats.fromMirrorDoc(doc);
+
+        expect(stats.sheetBody, isNotNull);
+        final body = stats.sheetBody!;
+        expect(body.experiencePoints, 'You have 5 unspent XP.');
+
+        expect(
+          body.abilityGroups.map((g) => g.label).toList(),
+          ['Shadow Affinity Skills', 'Iron Affinity'],
+          reason: 'group labels preserve LM source-HTML order verbatim',
+        );
+
+        final shadow = body.abilityGroups[0];
+        expect(shadow.abilities.map((a) => a.name).toList(),
+            ['Flashback', 'Shadow Step']);
+        expect(shadow.abilities[0].cost, '99');
+        expect(shadow.abilities[0].description,
+            'Frequency: Heist | Delivery: Self');
+
+        final iron = body.abilityGroups[1];
+        expect(iron.abilities[0].name, 'Shadow 1 [Iron]');
+        expect(iron.abilities[0].cost, '2');
+        expect(iron.abilities[0].description, isNull,
+            reason: 'an ability with no description key must yield null');
+        expect(iron.abilities[1].name, 'Body 6 [Iron]');
+        expect(iron.abilities[1].description, 'Iron-clad heart.');
+
+        expect(body.inventories, hasLength(1));
+        final inv = body.inventories[0];
+        expect(inv.title, "Heldrek's Personal Storage");
+        expect(inv.balances, hasLength(1));
+        expect(inv.balances[0].label, 'Monster Cores');
+        expect(inv.balances[0].value, '0');
+        expect(
+          inv.detailsUrl,
+          'https://lm.example/crucible/manage/ci/inventory/g7j03os5vzhj/view/',
+        );
+      },
+    );
+
+    test(
+      'Task 014: mirror doc with no sheet.body (legacy, pre-Task-014) → '
+      'sheetBody is null; the rest of CharacterStats is unchanged',
+      () async {
+        final doc = await seed({
+          'export': {'name': 'Heldrek', 'combat_style': 'Sword'},
+          'sheet': {
+            'sections': [
+              {
+                'label': 'Stats',
+                'rows': [
+                  {'label': 'HP', 'value': '42'},
+                ],
+              },
+            ],
+            // body key intentionally absent.
+          },
+        });
+
+        final stats = CharacterStats.fromMirrorDoc(doc);
+
+        expect(stats.sheetBody, isNull,
+            reason: 'no sheet.body → sheetBody must be null');
+        // Regression guard: rest of the model still parses normally.
+        expect(stats.name, 'Heldrek');
+        expect(stats.sheetSections.map((s) => s.label).toList(), ['Stats']);
+        expect(
+          stats.customFields.map((f) => f.key).toList(),
+          ['combat_style'],
+        );
+      },
+    );
+
+    test(
+      'Task 014: malformed sheet.body shapes never throw; sheetBody is '
+      'null when the payload cannot yield a usable SheetBody',
+      () async {
+        // body is a string instead of a map.
+        final docStringBody = await seed({
+          'export': {'name': 'A'},
+          'sheet': {'body': 'this should be a map'},
+        });
+        expect(
+          CharacterStats.fromMirrorDoc(docStringBody).sheetBody,
+          isNull,
+        );
+
+        // abilityGroups is a number.
+        final docBadGroups = await seed({
+          'export': {'name': 'B'},
+          'sheet': {
+            'body': {
+              'abilityGroups': 42,
+              'inventories': <dynamic>[],
+            },
+          },
+        });
+        expect(
+          CharacterStats.fromMirrorDoc(docBadGroups).sheetBody,
+          isNull,
+          reason: 'a malformed abilityGroups value must collapse the whole '
+              'sheetBody to null (single source of truth — no half-parsed '
+              'state)',
+        );
+
+        // inventories is a string.
+        final docBadInv = await seed({
+          'export': {'name': 'C'},
+          'sheet': {
+            'body': {
+              'abilityGroups': <dynamic>[],
+              'inventories': 'not-a-list',
+            },
+          },
+        });
+        expect(
+          CharacterStats.fromMirrorDoc(docBadInv).sheetBody,
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'Task 014: an ability with numeric cost (LM has historically '
+      'serialized cost as either int or string) parses to cost == "12" '
+      '(string), mirroring the existing _asScalarString tolerance for '
+      'the legacy abilities-list path',
+      () async {
+        final doc = await seed({
+          'export': {'name': 'Heldrek'},
+          'sheet': {
+            'body': {
+              'abilityGroups': [
+                {
+                  'label': 'Iron Affinity',
+                  'abilities': [
+                    {'name': 'Body 6 [Iron]', 'cost': 12},
+                  ],
+                },
+              ],
+              'inventories': <dynamic>[],
+            },
+          },
+        });
+
+        final stats = CharacterStats.fromMirrorDoc(doc);
+        expect(stats.sheetBody, isNotNull);
+        final ab = stats.sheetBody!.abilityGroups[0].abilities[0];
+        expect(ab.name, 'Body 6 [Iron]');
+        expect(
+          ab.cost,
+          '12',
+          reason: 'numeric cost must be stringified — same tolerance as the '
+              'existing Ability._asScalarString path',
+        );
+      },
+    );
   });
 }

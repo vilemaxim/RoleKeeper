@@ -3,22 +3,32 @@ import 'package:flutter/material.dart';
 import '../models/character.dart';
 import '../models/character_stats.dart';
 import '../services/character_stats_repository.dart';
+import '../services/character_sync_service.dart';
 import '../services/characters_repository.dart';
+import '../services/game_context_service.dart';
 import '../utils/error_reporting.dart';
 import '../utils/relative_time.dart';
 
 /// Character detail view. Renders LM-synced stats sections (Presentation,
 /// Custom Fields, Abilities) when the character originated from
 /// LarpManager; otherwise keeps the existing manual placeholder.
+///
+/// Task 013: when [character] is LM-synced (i.e. `larpManagerUuid != null`),
+/// the AppBar gains a refresh action that re-pulls just this character's
+/// LarpManager data via [CharacterSyncService]. The action sits BEFORE the
+/// existing archive PopupMenuButton.
 class CharacterDetailScreen extends StatelessWidget {
   const CharacterDetailScreen({
     super.key,
     required this.character,
     CharacterStatsRepository? statsRepository,
-  }) : _injectedStatsRepository = statsRepository;
+    CharacterSyncService? syncService,
+  })  : _injectedStatsRepository = statsRepository,
+        _injectedSyncService = syncService;
 
   final Character character;
   final CharacterStatsRepository? _injectedStatsRepository;
+  final CharacterSyncService? _injectedSyncService;
 
   CharacterStatsRepository get _statsRepository =>
       _injectedStatsRepository ?? CharacterStatsRepository();
@@ -31,6 +41,11 @@ class CharacterDetailScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(character.name),
         actions: [
+          if (_isLarpManagerSynced)
+            _RefreshAppBarAction(
+              characterUuid: character.larpManagerUuid!,
+              syncService: _injectedSyncService,
+            ),
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'archive') _archive(context);
@@ -93,6 +108,93 @@ class CharacterDetailScreen extends StatelessWidget {
       await CharactersRepository().archive(character.id);
       if (context.mounted) Navigator.pop(context);
     }
+  }
+}
+
+/// AppBar action that triggers a Task 013 player-driven refresh of one
+/// LM-synced character. Kept as a tight `StatefulWidget` wrapper so the
+/// outer [CharacterDetailScreen] stays a `StatelessWidget`: only the
+/// in-flight indicator state lives here, and the mirror-doc
+/// `StreamBuilder` in `_LarpManagerStatsSection` repaints the page on
+/// its own when the callable lands.
+class _RefreshAppBarAction extends StatefulWidget {
+  const _RefreshAppBarAction({
+    required this.characterUuid,
+    required this.syncService,
+  });
+
+  final String characterUuid;
+  final CharacterSyncService? syncService;
+
+  @override
+  State<_RefreshAppBarAction> createState() => _RefreshAppBarActionState();
+}
+
+class _RefreshAppBarActionState extends State<_RefreshAppBarAction> {
+  bool _inFlight = false;
+
+  CharacterSyncService get _service =>
+      widget.syncService ?? CharacterSyncService();
+
+  Future<void> _refresh() async {
+    if (_inFlight) return;
+    final tenant = GameContextService.instance.currentTenant;
+    if (tenant == null) return;
+    setState(() => _inFlight = true);
+
+    String snackbarText = '';
+    try {
+      final result = await _service.refresh(
+        tenant: tenant,
+        characterUuid: widget.characterUuid,
+      );
+      if (result.ok) {
+        snackbarText = 'Character refreshed';
+      } else {
+        final err = result.error ?? 'unknown error';
+        snackbarText = 'Could not refresh: $err';
+      }
+    } catch (e, st) {
+      final report = reportAppError('CharacterDetailScreen.refresh', e, st);
+      snackbarText = report.userMessage;
+    } finally {
+      if (mounted) {
+        setState(() => _inFlight = false);
+      }
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(snackbarText)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_inFlight) {
+      // IconButton has a default size of 48x48 (kMinInteractiveDimension);
+      // the icon inside is 24px. Match those so the swap doesn't reflow
+      // the AppBar layout.
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12),
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+      );
+    }
+    return IconButton(
+      icon: const Icon(Icons.refresh),
+      tooltip: 'Refresh from LarpManager',
+      onPressed: _refresh,
+    );
   }
 }
 

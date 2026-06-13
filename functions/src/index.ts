@@ -19,6 +19,7 @@ import {
 import { loadLarpManagerSyncConfigForGame } from "./larpmanager/integrationConfig";
 import { resolveLarpManagerPlayerAccess } from "./larpmanager/playerAccess";
 import { runLarpManagerSync } from "./larpmanager/sync";
+import { runSyncMyLarpManagerCharacter } from "./larpmanager/syncMyCharacter";
 import { toHttpsErrorForLarpManagerCredentialSave } from "./larpmanager/gcpErrors";
 import { upsertLarpManagerAuthSecret } from "./larpmanager/secretManager";
 import {
@@ -624,6 +625,36 @@ export const runLarpManagerSyncCallable = onCall(
     }
 
     return runLarpManagerSync(admin.firestore(), tenant, cfg);
+  }
+);
+
+/**
+ * Task 013: player-driven per-character refresh. An authenticated user
+ * can re-pull just THEIR owned character's inventory / abilities /
+ * sheet from LarpManager without waiting for the next admin or
+ * scheduled sync. Ownership is verified against
+ * `${gameEventBase(tenant)}/characters/{characterUuid}.ownerId`.
+ *
+ * The implementation lives in `larpmanager/syncMyCharacter.ts` so it
+ * can be unit-tested in isolation with an injected config loader (the
+ * real loader reaches into Secret Manager, which is not available
+ * under `node --test`).
+ */
+export const syncMyLarpManagerCharacterCallable = onCall(
+  {
+    region: REGION,
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+  async (request) => {
+    return runSyncMyLarpManagerCharacter(
+      {
+        db: admin.firestore(),
+        projectId: getGoogleCloudProjectId(),
+        loadConfig: loadLarpManagerSyncConfigForGame,
+      },
+      request
+    );
   }
 );
 
