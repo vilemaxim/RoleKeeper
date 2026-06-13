@@ -81,6 +81,7 @@ interface StubBatch {
     data: Record<string, unknown>,
     opts?: { merge?: boolean }
   ) => void;
+  delete: (ref: StubDocRef) => void;
   commit: () => Promise<void>;
 }
 
@@ -175,20 +176,35 @@ export function makeFirestoreStub(
   });
 
   const batch = (): StubBatch => {
-    const ops: StubWrite[] = [];
+    type BatchOp =
+      | { kind: "set"; path: string; data: Record<string, unknown>; merge: boolean }
+      | { kind: "delete"; path: string };
+    const ops: BatchOp[] = [];
     return {
       set(ref, data, opts) {
-        ops.push({ path: ref._path, data, merge: opts?.merge === true });
+        ops.push({
+          kind: "set",
+          path: ref._path,
+          data,
+          merge: opts?.merge === true,
+        });
+      },
+      delete(ref) {
+        ops.push({ kind: "delete", path: ref._path });
       },
       async commit() {
         for (const op of ops) {
+          if (op.kind === "delete") {
+            store.delete(op.path);
+            continue;
+          }
           if (op.merge) {
             const prev = store.get(op.path) ?? {};
             store.set(op.path, { ...prev, ...op.data });
           } else {
             store.set(op.path, { ...op.data });
           }
-          writes.push(op);
+          writes.push({ path: op.path, data: op.data, merge: op.merge });
         }
       },
     };

@@ -676,3 +676,406 @@ test(
     });
   }
 );
+
+// --- Task 006, second iteration: characters-by-email HTML join (Path 0) ---
+//
+// These tests cover the new top-of-funnel resolution path that pulls
+// (email → character_uuid) tuples from the `larpManagerCharactersByEmail`
+// collection (populated by `ingestManageRegistrationsHtml` from LM's
+// manage/registrations HTML page). The HTML join is the most authoritative
+// available signal: it uses LM's own user_uuid ↔ character_uuid mapping
+// and includes organizers who never appear in the CSV export.
+//
+// Why this lives alongside the existing Task-006 email-mirror tests: the
+// email-mirror path is still useful for LM events whose bulk export DOES
+// expose `player_email` (some installations / event configs do); the
+// HTML join is the only thing that works for the production crucible
+// event where the bulk export carries no email at all.
+
+const CHARS_BY_EMAIL_COL = "larpManagerCharactersByEmail";
+
+test(
+  "Task006-v2: Path-0 — characters-by-email doc with one uuid → " +
+    "resolves via mirror lookup and writes /characters",
+  async () => {
+    const { db, store } = makeFirestoreStub([
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL,
+          lmUserUuid: "usrjef0000ab",
+          characterUuids: ["charuuid0001"],
+        },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/charuuid0001`,
+        data: {
+          name: "Heldrek",
+          uuid: "charuuid0001",
+          number: 1,
+        },
+      },
+    ]);
+    await withCapturedLogs(async (logs) => {
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(result.hasCharacter, true);
+      assert.equal(result.characterCount, 1);
+      assert.equal(result.htmlLookupAttempted, true);
+      assert.equal(result.htmlLookupMatches, 1);
+      // The email-mirror path must NOT have run — Path 0 short-circuits.
+      assert.equal(result.organizerLookupAttempted, false);
+
+      const charDoc = store.get(`${BASE}/characters/charuuid0001`);
+      assert.ok(charDoc, "should write /characters/charuuid0001");
+      assert.equal(charDoc?.ownerId, UID);
+      assert.equal(charDoc?.name, "Heldrek");
+      assert.equal(charDoc?.shortId, "001");
+      assert.equal(charDoc?.larpManagerUuid, "charuuid0001");
+      assert.equal(charDoc?.source, "larpmanager");
+      assert.equal(charDoc?.isArchived, false);
+
+      assert.ok(
+        logs.some((l) =>
+          /characters-by-email HTML lookup/i.test(l.msg)
+        ),
+        "should emit the HTML-lookup diagnostic"
+      );
+      assert.ok(
+        logs.some((l) =>
+          /wrote characters \(HTML fallback\)/i.test(l.msg)
+        ),
+        "should emit the HTML-fallback wrote-characters diagnostic"
+      );
+    });
+  }
+);
+
+test(
+  "Task006-v2: Path-0 — works for plain players (not just organizers); " +
+    "the HTML join is deterministic so it's safe for every role",
+  async () => {
+    const { db, store } = makeFirestoreStub([
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL,
+          lmUserUuid: "usrplyr00001",
+          characterUuids: ["charuuid0002"],
+        },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/charuuid0002`,
+        data: { name: "Tabor", uuid: "charuuid0002", number: 2 },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      // isOrganizer: false → still resolves via Path 0 because the HTML
+      // join is exact (not the "don't auto-claim by email" heuristic).
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(result.hasCharacter, true);
+      assert.equal(result.htmlLookupAttempted, true);
+      assert.equal(result.htmlLookupMatches, 1);
+      assert.ok(store.get(`${BASE}/characters/charuuid0002`));
+    });
+  }
+);
+
+test(
+  "Task006-v2: Path-0 — multiple uuids resolve all matching mirror chars",
+  async () => {
+    const { db, store } = makeFirestoreStub([
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL,
+          lmUserUuid: "usrjef0000ab",
+          characterUuids: ["charuuid0001", "charuuid0099"],
+        },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/charuuid0001`,
+        data: { name: "Heldrek", uuid: "charuuid0001", number: 1 },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/charuuid0099`,
+        data: { name: "Tabor", uuid: "charuuid0099", number: 99 },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(result.hasCharacter, true);
+      assert.equal(result.characterCount, 2);
+      assert.equal(result.htmlLookupMatches, 2);
+      assert.ok(store.get(`${BASE}/characters/charuuid0001`));
+      assert.ok(store.get(`${BASE}/characters/charuuid0099`));
+    });
+  }
+);
+
+test(
+  "Task006-v2: Path-0 — uuids present in HTML join but mirror sync hasn't " +
+    "caught up yet → falls through to legacy paths, no false write",
+  async () => {
+    const { db, writes } = makeFirestoreStub([
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL,
+          lmUserUuid: "usrjef0000ab",
+          // Mirror has data, but NOT this uuid.
+          characterUuids: ["charuuid0001"],
+        },
+      },
+      // Mirror is populated but only has an unrelated character — the
+      // realistic shape of "the bulk export ran but doesn't yet have
+      // the user's char" (e.g. brand-new assignment not yet exported).
+      // `loadCharacterExportMap` short-circuits on a non-empty mirror,
+      // so this avoids the HTTP fallback path.
+      {
+        path: `${BASE}/larpManagerMirrorChars/unrelated01`,
+        data: { name: "Someone Else", uuid: "unrelated01", number: 50 },
+      },
+    ]);
+    await withCapturedLogs(async (logs) => {
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(result.hasCharacter, false);
+      assert.equal(result.htmlLookupAttempted, true);
+      // We had 1 uuid but mirror resolved 0 — log records the gap.
+      assert.equal(result.htmlLookupMatches, 1);
+      assert.equal(
+        writes.filter((w) => w.path.startsWith(`${BASE}/characters/`)).length,
+        0,
+        "no /characters write when the mirror doesn't yet have the uuid"
+      );
+      const htmlLog = logs.find((l) =>
+        /characters-by-email HTML lookup/i.test(l.msg)
+      );
+      assert.ok(htmlLog, "HTML lookup diagnostic should fire");
+      const meta = htmlLog?.meta as
+        | { htmlUuidsCount?: number; resolvedFromMirror?: number }
+        | undefined;
+      assert.equal(meta?.htmlUuidsCount, 1);
+      assert.equal(meta?.resolvedFromMirror, 0);
+    });
+  }
+);
+
+test(
+  "Task006-v2: Path-0 — empty characterUuids array (organizer staff row) → " +
+    "lookup is not attempted, falls straight through to legacy paths",
+  async () => {
+    const { db, writes } = makeFirestoreStub([
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL,
+          lmUserUuid: "usrstff00001",
+          characterUuids: [],
+        },
+      },
+    ]);
+    await withCapturedLogs(async (logs) => {
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(result.hasCharacter, false);
+      assert.equal(result.htmlLookupAttempted, false);
+      assert.equal(result.htmlLookupMatches, 0);
+      assert.equal(writes.length, 0);
+      assert.ok(
+        !logs.some((l) =>
+          /characters-by-email HTML lookup/i.test(l.msg)
+        ),
+        "no HTML lookup log when characterUuids is empty"
+      );
+    });
+  }
+);
+
+test(
+  "Task006-v2: Path-0 PII safety — HTML lookup log carries no raw email, " +
+    "character name, or LM user uuid",
+  async () => {
+    const { db } = makeFirestoreStub([
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL,
+          lmUserUuid: "usrjef0000ab",
+          characterUuids: ["charuuid0001"],
+        },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/charuuid0001`,
+        data: { name: "Secret Character Name", uuid: "charuuid0001", number: 1 },
+      },
+    ]);
+    await withCapturedLogs(async (logs) => {
+      await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      const serialised = JSON.stringify(logs);
+      assert.ok(
+        !serialised.includes(EMAIL),
+        `HTML-path logs must not contain raw email, got: ${serialised}`
+      );
+      assert.ok(
+        !serialised.includes("Secret Character Name"),
+        `HTML-path logs must not contain character name, got: ${serialised}`
+      );
+      assert.ok(
+        !serialised.includes("usrjef0000ab"),
+        `HTML-path logs must not contain LM user uuid, got: ${serialised}`
+      );
+    });
+  }
+);
+
+test(
+  "Task006-v2: production-shape regression — organizer with no CSV row but " +
+    "a manage/registrations HTML entry mapping their email to a character " +
+    "uuid IS resolved (this is the exact crucible failure mode)",
+  async () => {
+    const ORGANIZER_EMAIL = "organizer-svc@example.test";
+    const ORGANIZER_REG_DOC_ID = registrationDocIdForEmail(ORGANIZER_EMAIL);
+    const { db, store } = makeFirestoreStub([
+      // No registration CSV doc for this email — organizer is absent from
+      // the CSV export, exactly like production.
+      // Mirror char with NO email field anywhere (real LM crucible shape):
+      // only `owner` (display name) and `owner_uuid` (opaque LM id).
+      {
+        path: `${BASE}/larpManagerMirrorChars/realuuid001`,
+        data: {
+          name: "Heldrek",
+          uuid: "realuuid001",
+          number: 1,
+          export: {
+            number: 1,
+            name: "Heldrek",
+            uuid: "realuuid001",
+            owner: "Jeffrey Brite",
+            owner_uuid: "te93m14a7lly",
+            // Critically: NO player_email, no email, no user_email — this
+            // is what made the first Task-006 fix unable to resolve.
+          },
+        },
+      },
+      // The HTML-derived join table HAS the (email → character_uuid) tuple
+      // because LM's manage/registrations page exposes it explicitly.
+      {
+        path: `${BASE}/${CHARS_BY_EMAIL_COL}/${ORGANIZER_REG_DOC_ID}`,
+        data: {
+          emailLower: ORGANIZER_EMAIL,
+          lmUserUuid: "te93m14a7lly",
+          characterUuids: ["realuuid001"],
+        },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        ORGANIZER_EMAIL,
+        { isOrganizer: true }
+      );
+      assert.equal(
+        result.hasCharacter,
+        true,
+        "production fix: HTML-join MUST resolve where email-mirror cannot"
+      );
+      assert.equal(result.characterCount, 1);
+      assert.equal(result.htmlLookupMatches, 1);
+
+      const charDoc = store.get(`${BASE}/characters/realuuid001`);
+      assert.ok(charDoc);
+      assert.equal(charDoc?.ownerId, UID);
+      assert.equal(charDoc?.larpManagerUuid, "realuuid001");
+      assert.equal(charDoc?.name, "Heldrek");
+    });
+  }
+);
+
+test(
+  "Task006-v2: PRE-fix variant of the production-shape regression — without " +
+    "the HTML-join data, the existing email-mirror fallback finds nothing " +
+    "(this is the bug as it shipped in commit 25bb7f0)",
+  async () => {
+    const ORGANIZER_EMAIL = "organizer-svc@example.test";
+    const { db, writes } = makeFirestoreStub([
+      // Same mirror char with no email field, as captured from production.
+      {
+        path: `${BASE}/larpManagerMirrorChars/realuuid001`,
+        data: {
+          name: "Heldrek",
+          uuid: "realuuid001",
+          number: 1,
+          export: {
+            number: 1,
+            name: "Heldrek",
+            uuid: "realuuid001",
+            owner: "Jeffrey Brite",
+            owner_uuid: "te93m14a7lly",
+          },
+        },
+      },
+      // No larpManagerCharactersByEmail doc — simulating "Task 006 v2
+      // didn't run / orga_registrations permission not granted".
+    ]);
+    await withCapturedLogs(async () => {
+      const result = await syncPlayerCharactersForUser(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        ORGANIZER_EMAIL,
+        { isOrganizer: true }
+      );
+      assert.equal(
+        result.hasCharacter,
+        false,
+        "pre-fix shape: email-mirror finds nothing because no email is exported"
+      );
+      assert.equal(result.htmlLookupAttempted, false);
+      assert.equal(result.organizerLookupAttempted, true);
+      assert.equal(result.organizerLookupMatches, 0);
+      assert.equal(
+        writes.filter((w) => w.path.startsWith(`${BASE}/characters/`)).length,
+        0
+      );
+    });
+  }
+);

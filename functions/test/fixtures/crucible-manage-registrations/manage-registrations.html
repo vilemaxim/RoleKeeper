@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head><title>Manage registrations - Crucible (synthetic fixture)</title></head>
+<body>
+<!--
+  Synthetic copy of LarpManager's /{slug}/manage/registrations/ HTML used by
+  Task 006's parser tests. No real PII appears below. See README.md for the
+  shape origin and what each row covers.
+
+  Production HTML wraps the rows in a <table><tbody>…</tbody></table>; the
+  parser does not depend on outer wrapping so we omit it to keep the fixture
+  small. Each <tr id="…"> carries: (a) `pop="<lm_user_uuid>"` on the
+  post_popup_member <a>, (b) `<td class="email">…</td>`, and (c) zero or
+  more `<a href="/{slug}/manage/characters/<character_uuid>/edit/">` links.
+-->
+
+<tr id="r0000001">
+    <td>
+        <a href="/crucible/manage/registrations/r0000001/edit/"
+           qtip="Edit"><i class="fas fa-edit"></i></a>
+    </td>
+    <td>
+        Player One
+        <a href="#"
+           class="post_popup_member"
+           pop="usr111111111"><i class="fas fa-eye"></i></a>
+    </td>
+
+    <td class="email">player-one@example.test</td>
+
+
+        <td>
+
+
+            <a href="/crucible/manage/characters/charuuid0001/edit/">
+                #1
+                CharacterOne
+            </a>
+
+                <a href="/crucible/manage/registrations/charuuid0001/customization/"><i class="fas fa-user-pen"></i></a>
+
+        </td>
+
+
+    <td class="acc deadline"></td>
+</tr>
+
+<tr id="r0000002">
+    <td>
+        <a href="/crucible/manage/registrations/r0000002/edit/"
+           qtip="Edit"><i class="fas fa-edit"></i></a>
+    </td>
+    <td>
+        Staff Two
+        <a href="#"
+           class="post_popup_member"
+           pop="usr222222222"><i class="fas fa-eye"></i></a>
+    </td>
+
+    <td class="email">staff-two@example.test</td>
+
+
+        <td>
+
+        </td>
+
+
+    <td class="acc deadline"></td>
+</tr>
+
+<tr id="r0000003">
+    <td>
+        <a href="/crucible/manage/registrations/r0000003/edit/"
+           qtip="Edit"><i class="fas fa-edit"></i></a>
+    </td>
+    <td>
+        Player Three
+        <a href="#"
+           class="post_popup_member"
+           pop="usr333333333"><i class="fas fa-eye"></i></a>
+    </td>
+
+    <td class="email">PLAYER-THREE@Example.Test</td>
+
+
+        <td>
+
+
+            <a href="/crucible/manage/characters/charuuid0003/edit/">
+                #3
+                CharThree
+            </a>
+
+            <a href="/crucible/manage/characters/charuuid0099/edit/">
+                #99
+                CharNinetyNine
+            </a>
+
+        </td>
+
+
+    <td class="acc deadline"></td>
+</tr>
+
+<tr id="r0000004">
+    <td>
+        <a href="/crucible/manage/registrations/r0000004/edit/"
+           qtip="Edit"><i class="fas fa-edit"></i></a>
+    </td>
+    <td>
+        Broken Row Missing Uuid
+
+    </td>
+
+    <td class="email">no-uuid@example.test</td>
+
+
+        <td>
+        </td>
+
+
+    <td class="acc deadline"></td>
+</tr>
+
+<tr id="r0000005">
+    <td>
+        <a href="/crucible/manage/registrations/r0000005/edit/"
+           qtip="Edit"><i class="fas fa-edit"></i></a>
+    </td>
+    <td>
+        Broken Row Missing Email
+        <a href="#"
+           class="post_popup_member"
+           pop="usr555555555"><i class="fas fa-eye"></i></a>
+    </td>
+
+
+
+
+        <td>
+
+
+            <a href="/crucible/manage/characters/charuuid0005/edit/">
+                #5
+                CharFive
+            </a>
+
+        </td>
+
+
+    <td class="acc deadline"></td>
+</tr>
+
+</body>
+</html>

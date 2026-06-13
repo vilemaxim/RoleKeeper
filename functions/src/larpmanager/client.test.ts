@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
 
-import { establishLarpManagerSession } from "./client";
+import {
+  establishLarpManagerSession,
+  fetchCharacterSheetHtml,
+  LarpManagerHttpError,
+} from "./client";
 
 type FetchFn = typeof fetch;
 
@@ -214,6 +218,106 @@ test(
         fetchDetails: false,
       });
       assert.equal(jar.get("sessionid"), "preset-session-id");
+    });
+  }
+);
+
+// --- fetchCharacterSheetHtml ----------------------------------------------
+//
+// New in Task 008: per-character sheet GET used by the capture script
+// (and later by the Task 009 sync wiring) to scrape the rich gameplay
+// stats LM renders server-side but never exposes via /export/char/ or
+// the abilities/inventory JSON endpoints.
+
+test(
+  "fetchCharacterSheetHtml: GETs /{slug}/character/{uuid}/ with the session " +
+    "cookie header and returns the HTML body plus the final URL",
+  async () => {
+    const calls: Array<{ url: string; method: string; cookie?: string }> = [];
+    const handler: FetchFn = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as URL).toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      calls.push({ url, method, cookie: headers["Cookie"] });
+      return mockResponse({
+        status: 200,
+        body: "<html><body>Heldrek sheet</body></html>",
+        url,
+      });
+    };
+
+    await withMockedFetch(handler, async () => {
+      const jar = new Map<string, string>();
+      jar.set("sessionid", "active-1");
+      const { html, finalUrl } = await fetchCharacterSheetHtml(
+        {
+          baseUrl: "https://lm.example",
+          eventSlug: "crucible",
+          sessionId: "active-1",
+          fetchDetails: false,
+        },
+        jar,
+        "oxe9sb0w02ig"
+      );
+      assert.equal(html, "<html><body>Heldrek sheet</body></html>");
+      assert.ok(
+        finalUrl.endsWith("/crucible/character/oxe9sb0w02ig/"),
+        `finalUrl must point at the character sheet, got: ${finalUrl}`
+      );
+    });
+
+    assert.equal(calls.length, 1, "exactly one HTTP call expected");
+    assert.equal(calls[0]?.method, "GET");
+    assert.equal(
+      calls[0]?.url,
+      "https://lm.example/crucible/character/oxe9sb0w02ig/",
+      "GET URL must be /{slug}/character/{uuid}/ on the configured base"
+    );
+    assert.match(
+      String(calls[0]?.cookie ?? ""),
+      /sessionid=active-1/,
+      "session cookie must be forwarded"
+    );
+  }
+);
+
+test(
+  "fetchCharacterSheetHtml: non-2xx response → throws LarpManagerHttpError " +
+    "tagged with the status and URL the GET targeted",
+  async () => {
+    const handler: FetchFn = async (input) => {
+      const url = typeof input === "string" ? input : (input as URL).toString();
+      return mockResponse({
+        status: 404,
+        body: "Not Found",
+        url,
+      });
+    };
+    await withMockedFetch(handler, async () => {
+      const jar = new Map<string, string>();
+      jar.set("sessionid", "active-1");
+      await assert.rejects(
+        () =>
+          fetchCharacterSheetHtml(
+            {
+              baseUrl: "https://lm.example",
+              eventSlug: "crucible",
+              sessionId: "active-1",
+              fetchDetails: false,
+            },
+            jar,
+            "missing00uuid"
+          ),
+        (err: unknown) => {
+          assert.ok(
+            err instanceof LarpManagerHttpError,
+            "must reject with LarpManagerHttpError, not a generic Error"
+          );
+          assert.equal(err.status, 404);
+          assert.match(err.url, /\/crucible\/character\/missing00uuid\//);
+          return true;
+        }
+      );
     });
   }
 );

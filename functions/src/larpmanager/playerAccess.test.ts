@@ -26,14 +26,16 @@ const REG_DOC_ID = registrationDocIdForEmail(EMAIL);
 
 const ORG_META_PATH = `${BASE}/larpManagerOrganizersMeta/summary`;
 const REG_META_PATH = `${BASE}/larpManagerRegistrationsMeta/summary`;
+const CHARS_BY_EMAIL_META_PATH = `${BASE}/larpManagerCharactersByEmailMeta/summary`;
 
 function freshTimestampSeed(): StubDocSeed[] {
   const ms = Date.now();
   const ts = { toMillis: () => ms, toDate: () => new Date(ms) };
-  // Seed both sync-meta docs with a fresh `lastSyncedAt` so the in-process
-  // sync helpers (organizers + registrations) short-circuit on cache without
-  // attempting any real HTTP fetch. The actual sync logic is covered by
-  // dedicated tests in registrations.test.ts and organizers.test.ts.
+  // Seed all three sync-meta docs with a fresh `lastSyncedAt` so the
+  // in-process sync helpers (organizers + registrations + characters-by-
+  // email) short-circuit on cache without attempting any real HTTP fetch.
+  // The actual sync logic is covered by dedicated tests in
+  // registrations.test.ts, organizers.test.ts, and charactersByEmail.test.ts.
   return [
     {
       path: `${BASE}/larpManagerOrganizersMeta/summary`,
@@ -42,6 +44,10 @@ function freshTimestampSeed(): StubDocSeed[] {
     {
       path: `${BASE}/larpManagerRegistrationsMeta/summary`,
       data: { lastSyncedAt: ts, registrationCount: 1, syncRunId: "stub" },
+    },
+    {
+      path: CHARS_BY_EMAIL_META_PATH,
+      data: { lastSyncedAt: ts, rowCount: 0, syncRunId: "stub" },
     },
   ];
 }
@@ -632,6 +638,119 @@ test(
       assert.equal(r.hasCharacter, true, "legacy /characters probe wins");
       assert.equal(r.characterCount, 1);
       assert.equal(r.characterMessage, null);
+    });
+  }
+);
+
+// --- Task 006, second iteration: end-to-end through resolveLarpManagerPlayerAccess
+//
+// Pins the new flow: the manage/registrations HTML scrape populated
+// `larpManagerCharactersByEmail/{regDocId}`; resolveLarpManagerPlayerAccess
+// must consult it via syncPlayerCharactersForUser's Path-0 and emit
+// hasCharacter:true with `characterMessage` null.
+
+test(
+  "Task006-v2: organizer + characters-by-email join entry → " +
+    "resolver writes /characters and returns hasCharacter:true, " +
+    "no characterMessage",
+  async () => {
+    const { db, store } = makeFirestoreStub([
+      ...freshTimestampSeed(),
+      {
+        path: `${BASE}/larpManagerOrganizers/${REG_DOC_ID}`,
+        data: { emailLower: EMAIL_LOWER, source: "larpmanager" },
+      },
+      // Mirror char has NO email field (production shape).
+      {
+        path: `${BASE}/larpManagerMirrorChars/realuuid001`,
+        data: {
+          name: "Heldrek",
+          uuid: "realuuid001",
+          number: 1,
+          export: {
+            number: 1,
+            name: "Heldrek",
+            uuid: "realuuid001",
+            owner: "Jeffrey Brite",
+            owner_uuid: "te93m14a7lly",
+          },
+        },
+      },
+      // The HTML-derived join table HAS the (email → character_uuid) tuple.
+      {
+        path: `${BASE}/larpManagerCharactersByEmail/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL_LOWER,
+          lmUserUuid: "te93m14a7lly",
+          characterUuids: ["realuuid001"],
+        },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, true);
+      assert.equal(r.role, "owner");
+      assert.equal(r.hasCharacter, true);
+      assert.equal(r.characterCount, 1);
+      assert.equal(r.characterMessage, null);
+      assert.ok(
+        store.get(`${BASE}/characters/realuuid001`),
+        "should write /characters/realuuid001 via Path 0"
+      );
+    });
+  }
+);
+
+test(
+  "Task006-v2: plain player + characters-by-email join entry → resolves " +
+    "without needing isOrganizer (HTML join is deterministic for all roles)",
+  async () => {
+    const { db, store } = makeFirestoreStub([
+      ...freshTimestampSeed(),
+      // No organizer cache entry — user is a plain registered player.
+      {
+        path: `${BASE}/larpManagerRegistrations/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL_LOWER,
+          characterNames: [], // CSV row had no character column populated
+        },
+      },
+      {
+        path: `${BASE}/larpManagerMirrorChars/realuuid002`,
+        data: {
+          name: "Tabor",
+          uuid: "realuuid002",
+          number: 2,
+        },
+      },
+      {
+        path: `${BASE}/larpManagerCharactersByEmail/${REG_DOC_ID}`,
+        data: {
+          emailLower: EMAIL_LOWER,
+          lmUserUuid: "usrabc000001",
+          characterUuids: ["realuuid002"],
+        },
+      },
+    ]);
+    await withCapturedLogs(async () => {
+      const r = await resolveLarpManagerPlayerAccess(
+        db as unknown as admin.firestore.Firestore,
+        TENANT,
+        CONFIG,
+        UID,
+        EMAIL
+      );
+      assert.equal(r.isOrganizer, false);
+      assert.equal(r.registered, true);
+      assert.equal(r.hasCharacter, true);
+      assert.equal(r.characterCount, 1);
+      assert.ok(store.get(`${BASE}/characters/realuuid002`));
     });
   }
 );

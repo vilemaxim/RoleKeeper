@@ -23,14 +23,29 @@ export interface LarpManagerCharacterExport {
   uuid?: string;
   teaser?: string;
   /**
-   * Optional email of the LarpManager user assigned to this character. LM
-   * uses one of several field names across installations / event configs
-   * (`player_email` on hosted larpmanager.com; older installs sometimes use
-   * `player`, `user_email`, or a bare `email`). These fields are declared so
-   * downstream code can be explicit about what it consumes, but the
-   * organizer email-mirror lookup in `playerCharacters.ts` walks ALL
-   * string-valued fields rather than relying on any single key so it stays
-   * resilient to future LM schema drift.
+   * Display name of the LarpManager user assigned to this character.
+   * Always present on hosted larpmanager.com exports; absent on hidden
+   * characters and on events without owner assignments. Never matchable
+   * against a RoleKeeper email — see the Task 006 (second iteration)
+   * analysis for why the email-mirror join was abandoned in favour of
+   * the manage/registrations HTML scrape (`charactersByEmail.ts`).
+   */
+  owner?: string;
+  /**
+   * Opaque 12-char LarpManager UuidMixin id (`[a-z0-9]{12}`) of the user
+   * assigned to this character. Stable across LM exports for the same
+   * user, but NOT discoverable from a RoleKeeper email alone — the
+   * manage/registrations HTML scrape is what joins email → owner_uuid →
+   * character_uuid for us.
+   */
+  owner_uuid?: string;
+  /**
+   * Historical optimistic email fields kept declared (but no longer
+   * populated by the hosted LM endpoint we tested) so downstream code
+   * can still type-check usages introduced before Task 006's second
+   * iteration. The organizer email-mirror lookup in `playerCharacters.ts`
+   * still walks ALL string-valued fields so any LM install that DOES
+   * surface emails on the export keeps working.
    */
   player_email?: string;
   player?: string;
@@ -42,6 +57,13 @@ export interface LarpManagerCharacterExport {
 export interface LarpManagerSyncResult {
   characterCount: number;
   detailsFetched: number;
+  /**
+   * Count of characters whose per-character LM HTML sheet was both
+   * fetched AND parsed without error during the sync. Independent of
+   * `detailsFetched` so a sheet fetch/parse failure for one character
+   * cannot regress the existing inventory+abilities counter (Task 009).
+   */
+  sheetsFetched: number;
   exportSha256: string;
   errors: string[];
 }

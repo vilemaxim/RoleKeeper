@@ -8,6 +8,10 @@ import { logger } from "firebase-functions";
 import type { GameTenant } from "../gameTenant";
 import { gameEventBase, tenantKey } from "../gameTenant";
 import {
+  syncLarpManagerCharactersByEmail,
+  type LarpManagerCharactersByEmailSyncResult,
+} from "./charactersByEmail";
+import {
   isEmailLarpManagerOrganizer,
   MEMBERSHIP_ORGANIZER_EMAIL_FIELD,
   MEMBERSHIP_ROLE_FIELD,
@@ -77,16 +81,21 @@ export async function resolveLarpManagerPlayerAccess(
   const tKey = tenantKey(tenant);
   const force = options?.forceSync === true;
 
-  // Run the two HTTP-backed syncs independently so one failure cannot
-  // hide the other or block the downstream character sync. The three
-  // collaborators below (`isEmailLarpManagerOrganizer`, the cached reg-doc
-  // lookup, and `syncPlayerCharactersForUser`'s legacy fallback) all read
-  // the cached Firestore docs already, so a degraded sync still serves
+  // Run the three HTTP-backed syncs independently so one failure cannot
+  // hide the others or block the downstream character sync. The
+  // characters-by-email sync was added in Task 006 (second iteration)
+  // to populate the manage/registrations HTML join table. The downstream
+  // collaborators (`isEmailLarpManagerOrganizer`, the cached reg-doc
+  // lookup, and `syncPlayerCharactersForUser`'s Path-0/Path-C fallbacks)
+  // all read cached Firestore docs, so a degraded sync still serves
   // previously-good data.
-  const [orgSettled, regSettled] = await Promise.allSettled([
-    syncLarpManagerOrganizers(db, tenant, config, { force }),
-    syncLarpManagerRegistrations(db, tenant, config, { force }),
-  ]);
+  const [orgSettled, regSettled, charsByEmailSettled] = await Promise.allSettled(
+    [
+      syncLarpManagerOrganizers(db, tenant, config, { force }),
+      syncLarpManagerRegistrations(db, tenant, config, { force }),
+      syncLarpManagerCharactersByEmail(db, tenant, config, { force }),
+    ]
+  );
 
   let orgSync: LarpManagerOrganizerSyncResult | null = null;
   let organizerSyncError: string | null = null;
@@ -119,6 +128,33 @@ export async function resolveLarpManagerPlayerAccess(
       error: registrationSyncError,
     });
   }
+
+  // The HTML characters-by-email sync is best-effort: when it succeeds
+  // it populates the most authoritative join table; when it fails we
+  // continue with the existing CSV + email-mirror paths and surface the
+  // error to the caller so the UI can show actionable copy if needed.
+  // No public *SyncError surface for this one yet — folded into
+  // `characterSyncError` below if the resolver itself fails. Failures
+  // here are common during the orga_registrations permission rollout
+  // and shouldn't blast through to the operator as a separate row.
+  let charsByEmailSync: LarpManagerCharactersByEmailSyncResult | null = null;
+  if (charsByEmailSettled.status === "fulfilled") {
+    charsByEmailSync = charsByEmailSettled.value;
+  } else {
+    logger.warn(
+      "resolveLarpManagerPlayerAccess: characters-by-email sync failed " +
+        "(non-fatal; falling back to CSV+mirror paths)",
+      {
+        sync: "syncLarpManagerCharactersByEmail",
+        eventBase: base,
+        error: safeSyncErrorMessage(
+          charsByEmailSettled.reason,
+          "LarpManager characters-by-email sync failed"
+        ),
+      }
+    );
+  }
+  void charsByEmailSync;
 
   // Counts fall back to the most recent cached meta totals so the UI still
   // reflects last-known-good numbers when a refresh failed.
@@ -209,11 +245,15 @@ export async function resolveLarpManagerPlayerAccess(
     characterCount: number;
     organizerLookupAttempted: boolean;
     organizerLookupMatches: number;
+    htmlLookupAttempted: boolean;
+    htmlLookupMatches: number;
   } = {
     hasCharacter: false,
     characterCount: 0,
     organizerLookupAttempted: false,
     organizerLookupMatches: 0,
+    htmlLookupAttempted: false,
+    htmlLookupMatches: 0,
   };
   let characterSyncError: string | null = null;
   if (isOrganizer || registered) {
@@ -252,6 +292,8 @@ export async function resolveLarpManagerPlayerAccess(
             characterCount: cachedChars.size,
             organizerLookupAttempted: false,
             organizerLookupMatches: 0,
+            htmlLookupAttempted: false,
+            htmlLookupMatches: 0,
           };
         }
       } catch {
