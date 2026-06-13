@@ -222,15 +222,25 @@ class _StatsBody extends StatelessWidget {
     final hasPresentation =
         stats.teaser != null || stats.presentation != null;
 
+    // Task 010: when the per-character LM HTML sheet has been scraped
+    // (Task 008 parser + Task 009 sync), render its sections at the
+    // TOP of the body and suppress the Custom Fields panel below
+    // (the scraped sheet is canonical and rendering both would
+    // double-up every row). When the sheet is absent or its sections
+    // are all filtered to empty, the pre-Task-010 Custom Fields
+    // fallback continues to render unchanged.
+    final hasSheet = stats.sheetSections.isNotEmpty;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (hasSheet) _SheetPanel(sections: stats.sheetSections),
         if (hasPresentation)
           _Section(
             label: 'Presentation',
             child: _PresentationBlock(stats: stats),
           ),
-        if (stats.customFields.isNotEmpty)
+        if (!hasSheet && stats.customFields.isNotEmpty)
           _Section(
             label: 'Custom Fields',
             child: _CustomFieldsBlock(fields: stats.customFields),
@@ -241,6 +251,48 @@ class _StatsBody extends StatelessWidget {
             child: _AbilitiesBlock(abilities: stats.abilities),
           ),
         _LastSyncedFooter(lastSyncedAt: stats.lastSyncedAt),
+      ],
+    );
+  }
+}
+
+/// Renders the scraped LM character-sheet sections (Task 010) at the
+/// top of `_StatsBody`. One `_Section` per [SheetSection] so spacing
+/// matches the existing Presentation / Custom Fields / Abilities
+/// blocks. Section labels and row labels are verbatim from the parser
+/// — no humanization, no re-casing, no sorting — to match the LM web
+/// page exactly.
+class _SheetPanel extends StatelessWidget {
+  const _SheetPanel({required this.sections});
+
+  final List<SheetSection> sections;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final section in sections)
+          _Section(
+            label: section.label,
+            child: _SheetSectionBody(rows: section.rows),
+          ),
+      ],
+    );
+  }
+}
+
+class _SheetSectionBody extends StatelessWidget {
+  const _SheetSectionBody({required this.rows});
+
+  final List<SheetRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final r in rows) _LabelValueRow(label: r.label, value: r.value),
       ],
     );
   }
@@ -302,31 +354,41 @@ class _CustomFieldsBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final f in fields) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 1,
-                  child: Text(
-                    f.label,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+        for (final f in fields)
+          _LabelValueRow(label: f.label, value: f.value),
+      ],
+    );
+  }
+}
+
+/// Two-column label/value row shared by the Custom Fields block and
+/// the Task 010 sheet panel. Keeps the flex ratio + on-surface label
+/// colour consistent so the two sections look identical.
+class _LabelValueRow extends StatelessWidget {
+  const _LabelValueRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 1,
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(f.value),
-                ),
-              ],
             ),
           ),
+          Expanded(flex: 2, child: Text(value)),
         ],
-      ],
+      ),
     );
   }
 }

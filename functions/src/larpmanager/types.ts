@@ -57,6 +57,13 @@ export interface LarpManagerCharacterExport {
 export interface LarpManagerSyncResult {
   characterCount: number;
   detailsFetched: number;
+  /**
+   * Count of characters whose per-character LM HTML sheet was both
+   * fetched AND parsed without error during the sync. Independent of
+   * `detailsFetched` so a sheet fetch/parse failure for one character
+   * cannot regress the existing inventory+abilities counter (Task 009).
+   */
+  sheetsFetched: number;
   exportSha256: string;
   errors: string[];
 }

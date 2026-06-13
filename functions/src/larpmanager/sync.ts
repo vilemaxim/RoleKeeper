@@ -6,12 +6,15 @@ import * as crypto from "crypto";
 
 import * as admin from "firebase-admin";
 
+import { parseCharacterSheetHtml } from "./characterSheet";
 import {
   establishLarpManagerSession,
   fetchCharacterAbilitiesJson,
   fetchCharacterExportJson,
   fetchCharacterInventoryJson,
+  fetchCharacterSheetHtml,
 } from "./client";
+import { htmlToPlainText } from "./htmlText";
 import { type GameTenant, gameEventBase } from "../gameTenant";
 import type { LarpManagerSyncConfig, LarpManagerSyncResult } from "./types";
 
@@ -30,6 +33,7 @@ export async function runLarpManagerSync(
 
   const errors: string[] = [];
   let detailsFetched = 0;
+  let sheetsFetched = 0;
   const summaryRef = db.doc(`${base}/larpManagerMirrorMeta/summary`);
   const now = admin.firestore.FieldValue.serverTimestamp();
 
@@ -46,17 +50,42 @@ export async function runLarpManagerSync(
       number: ch.number ?? Number(numKey),
       name: ch.name,
       uuid: ch.uuid ?? null,
-      teaser: ch.teaser,
       export: ch,
       lastSyncedAt: now,
       source: "larpmanager",
     };
+    // Task 011: store the display-clean projection of teaser on the
+    // mirror doc so Flutter's Text widget doesn't render literal
+    // `<p>Fire Mage</p>`. The verbatim raw HTML still rides inside
+    // `row.export.teaser` for any future consumer that needs LM's
+    // original markup. Omit the top-level `teaser` field entirely
+    // when the strip yields no displayable text — writing `null` or
+    // `''` would otherwise persist into Firestore.
+    const teaserPlain = htmlToPlainText(
+      typeof ch.teaser === "string" ? ch.teaser : null
+    );
+    if (teaserPlain !== undefined) {
+      row.teaser = teaserPlain;
+    }
 
     if (config.fetchDetails && uuid) {
       try {
         row.inventory = await fetchCharacterInventoryJson(config, jar, uuid);
         row.abilities = await fetchCharacterAbilitiesJson(config, jar, uuid);
         detailsFetched += 1;
+      } catch (e) {
+        errors.push(`${docId}: ${(e as Error).message}`);
+      }
+      // Sheet fetch + parse is intentionally isolated in its own try
+      // so a sheet HTTP/parse failure for THIS character does NOT
+      // poison the inventory+abilities pair above (or vice versa),
+      // and so failures for one character don't abort the loop for
+      // the others. Counter is independent of detailsFetched per
+      // Task 009 spec.
+      try {
+        const { html } = await fetchCharacterSheetHtml(config, jar, uuid);
+        row.sheet = parseCharacterSheetHtml(html);
+        sheetsFetched += 1;
       } catch (e) {
         errors.push(`${docId}: ${(e as Error).message}`);
       }
@@ -91,6 +120,7 @@ export async function runLarpManagerSync(
   return {
     characterCount: characters.length,
     detailsFetched,
+    sheetsFetched,
     exportSha256,
     errors,
   };
