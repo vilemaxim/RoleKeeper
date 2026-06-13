@@ -127,7 +127,6 @@ class _FakeIntegrationRepo extends LarpManagerIntegrationRepository {
         baseUrl: 'https://lm.example.com',
         eventSlug: 'run-a',
         loginPath: '/login/',
-        fetchDetails: false,
         credentialsConfigured: configured,
       );
 }

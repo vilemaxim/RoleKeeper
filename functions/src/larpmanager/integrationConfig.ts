@@ -17,10 +17,20 @@ export interface LarpManagerIntegrationPublic {
   baseUrl: string;
   eventSlug: string;
   loginPath: string;
-  fetchDetails: boolean;
   credentialsConfigured: boolean;
 }
 
+/**
+ * Project a stored `larpManagerIntegration/config` doc into the
+ * public-shape used downstream.
+ *
+ * Task 012 / ADR 0001 removed the `fetchDetails` field from the
+ * projection. The loader still TOLERATES a legacy `fetchDetails: bool`
+ * field on the stored doc — we did not run a Firestore migration to
+ * delete the stale field, so existing docs may still carry it. We
+ * silently ignore it here and never surface it on the returned
+ * object. See docs/adr/0001-remove-fetchdetails-toggle.md.
+ */
 export function parseIntegrationDoc(
   data: admin.firestore.DocumentData | undefined
 ): LarpManagerIntegrationPublic | null {
@@ -32,7 +42,6 @@ export function parseIntegrationDoc(
     baseUrl,
     eventSlug,
     loginPath: String(data.loginPath ?? "/login/").trim() || "/login/",
-    fetchDetails: data.fetchDetails === true,
     credentialsConfigured: data.credentialsConfigured === true,
   };
 }
@@ -59,6 +68,5 @@ export async function loadLarpManagerSyncConfigForGame(
     password: auth.password,
     sessionId: auth.sessionId,
     loginPath: pub.loginPath,
-    fetchDetails: pub.fetchDetails,
   };
 }

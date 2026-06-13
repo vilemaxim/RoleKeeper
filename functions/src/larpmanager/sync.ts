@@ -68,7 +68,12 @@ export async function runLarpManagerSync(
       row.teaser = teaserPlain;
     }
 
-    if (config.fetchDetails && uuid) {
+    // Task 012 / ADR 0001: admin sync is always full. Every uuid-bearing
+    // character gets its inventory, abilities, and parsed HTML sheet
+    // fetched on every sync. The `fetchDetails` config toggle is gone;
+    // the only remaining gate is the uuid check (characters without a
+    // uuid have no per-character endpoint to call).
+    if (uuid) {
       try {
         row.inventory = await fetchCharacterInventoryJson(config, jar, uuid);
         row.abilities = await fetchCharacterAbilitiesJson(config, jar, uuid);
@@ -112,7 +117,10 @@ export async function runLarpManagerSync(
       eventSlug: config.eventSlug,
       characterCount: characters.length,
       exportSha256,
-      fetchDetails: config.fetchDetails,
+      // Task 012 / ADR 0001: no `fetchDetails` key. Stale `fetchDetails`
+      // fields in pre-Task-012 summary docs are left alone (Firestore
+      // tolerates extra fields); merge writes simply stop refreshing
+      // them. UI never reads them.
     },
     { merge: true }
   );

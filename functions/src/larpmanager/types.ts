@@ -13,8 +13,10 @@ export interface LarpManagerSyncConfig {
   sessionId?: string;
   /** Path for login GET/POST, default /login/ */
   loginPath?: string;
-  /** Fetch per-character inventory + abilities JSON after bulk export. */
-  fetchDetails: boolean;
+  // Task 012 / ADR 0001: the `fetchDetails: boolean` flag has been
+  // removed. Admin and scheduled syncs always pull full per-character
+  // data (inventory + abilities + parsed HTML sheet) for every
+  // character with a uuid. See docs/adr/0001-remove-fetchdetails-toggle.md.
 }
 
 export interface LarpManagerCharacterExport {

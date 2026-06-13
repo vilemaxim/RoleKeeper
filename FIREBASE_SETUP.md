@@ -117,7 +117,7 @@ firebase deploy --only firestore:rules,firestore:indexes
 
 | Path | Content |
 |------|---------|
-| `games/{gameId}/larpManagerIntegration/config` | `baseUrl`, `eventSlug`, `loginPath`, `fetchDetails`, `credentialsConfigured` (written by Cloud Function only) |
+| `games/{gameId}/larpManagerIntegration/config` | `baseUrl`, `eventSlug`, `loginPath`, `credentialsConfigured` (written by Cloud Function only). _Note: legacy `fetchDetails` field on existing docs is ignored — see `docs/adr/0001-remove-fetchdetails-toggle.md`._ |
 | `games/{gameId}/larpManagerMirrorMeta/summary` | `lastSyncedAt`, `lastOk`, `lastError`, `characterCount`, `exportSha256`, … |
 | `games/{gameId}/larpManagerMirrorChars/{characterUuid}` | `export`, optional `inventory` / `abilities`, `lastSyncedAt` |
 | `games/{gameId}/larpManagerSyncSettings/config` | Scheduled sync on/off, `minIntervalMinutes`, optional UTC window (owner/superAdmin) |

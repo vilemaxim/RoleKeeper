@@ -17,7 +17,6 @@ const BASE = gameEventBase(TENANT);
 const CONFIG: LarpManagerSyncConfig = {
   baseUrl: "https://lm.example",
   eventSlug: "evt1",
-  fetchDetails: false,
 };
 const UID = "user-1";
 const EMAIL = "Player@Example.COM";

@@ -574,7 +574,6 @@ interface LarpManagerSyncConfigShape {
   username?: string;
   password?: string;
   sessionId?: string;
-  fetchDetails: boolean;
 }
 
 interface CharacterExportEntry {
@@ -694,7 +693,6 @@ async function captureFromLm(opts: CliOptions): Promise<CaptureMeta> {
     username: opts.username,
     password: opts.password,
     sessionId: opts.sessionId,
-    fetchDetails: false,
   };
 
   console.log(`> Authenticating with LarpManager at ${opts.baseUrl} …`);
