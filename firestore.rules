@@ -161,6 +161,17 @@ service cloud.firestore {
           allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
         }
 
+        match /locationPings/{pingId} {
+          allow create: if false;
+          allow read: if isAuthenticated()
+            && isGameMember(instanceId, eventSlug)
+            && (
+              isStaffOrAbove(instanceId, eventSlug)
+              || resource.data.playerId == request.auth.uid
+            );
+          allow update, delete: if false;
+        }
+
         match /characters/{characterId} {
           allow create: if isAuthenticated()
             && isGameMember(instanceId, eventSlug)

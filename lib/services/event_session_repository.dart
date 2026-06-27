@@ -30,6 +30,10 @@ class EventSessionRepository {
     return EventSession.fromMap(doc.data());
   }
 
+  Stream<EventSession> watch() {
+    return _configRef.snapshots().map((doc) => EventSession.fromMap(doc.data()));
+  }
+
   Future<void> startEvent() async {
     await _configRef.set(
       {
