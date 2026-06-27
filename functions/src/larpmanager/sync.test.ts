@@ -642,50 +642,6 @@ test(
   }
 );
 
-<<<<<<< HEAD
-// --- Task 014: sheet.body write-through ----------------------------------
-//
-// `runLarpManagerSync` already writes `row.sheet = parseCharacterSheetHtml(html)`
-// for each character. Task 014 adds an optional `body` field to that
-// projection. This test pins that when the per-character HTML carries a
-// `<div class="sheet">` block with `<h3>` ability groups, the mirror doc
-// the sync writes has `sheet.body.abilityGroups` non-empty — i.e. the
-// new field rides through `parseCharacterSheetHtml → row.sheet` to
-// Firestore with NO changes to `sync.ts`.
-
-const SHEET_HTML_WITH_BODY = [
-  "<!DOCTYPE html>",
-  "<html><body>",
-  '  <div class="character">',
-  '    <div class="presentation">',
-  '      <div class="first">',
-  '        <div class="go-inline"><b>Player:&nbsp;</b>Player 1</div>',
-  "      </div>",
-  "    </div>",
-  '    <div class="sheet">',
-  "      <h2>Abilities</h2>",
-  "      <h3>Common Skills</h3>",
-  '      <table class="mob abilities">',
-  "        <tbody><tr>",
-  "          <th><h4>Block (1)</h4></th>",
-  "          <td><p>Block one attack.</p></td>",
-  "        </tr></tbody>",
-  "      </table>",
-  "    </div>",
-  "  </div>",
-  "</body></html>",
-].join("\n");
-
-test(
-  "runLarpManagerSync (Task 014): when the per-character HTML carries a " +
-    "<div class=\"sheet\"> block with <h3> ability groups, the mirror doc " +
-    "has sheet.body.abilityGroups non-empty (write-through of the new " +
-    "parser field, no sync.ts code change)",
-  async () => {
-    const uuid = "char00014aaa";
-    const exportJson = {
-      "1": exportEntry({ number: 1, uuid, name: "Heldrek" }),
-=======
 // --- Task 012: remove fetchDetails toggle; admin sync is always full ------
 //
 // After Task 012 there is exactly one sync mode: always full. Every
@@ -694,12 +650,6 @@ test(
 // toggle is gone from `LarpManagerSyncConfig`, from
 // `runLarpManagerSync`'s gating logic, and from the
 // `larpManagerMirrorMeta/summary` doc write.
-//
-// The tests below are written against the post-Task-012 shape: the
-// `LarpManagerSyncConfig` literal does NOT include `fetchDetails`. To
-// keep them compiling while the type still requires the field (Red
-// phase), we cast through `unknown`. After the type loses the field
-// the casts are harmless no-ops.
 
 test(
   "runLarpManagerSync (Task 012): a uuid-bearing character ALWAYS " +
@@ -724,22 +674,13 @@ test(
 
     const { db, store } = makeFirestoreStub();
 
-    // Post-Task-012 shape: NO fetchDetails key. Cast through unknown
-    // so this compiles while the type still demands the field. After
-    // implementation drops the field the cast becomes a no-op.
-    const config = {
-      baseUrl: "https://lm.example",
-      eventSlug: "crucible",
-      sessionId: "stub-session-id",
-    } as unknown as LarpManagerSyncConfig;
-
     let result: LarpManagerSyncResult | undefined;
     await withCapturedLogs(async () => {
       await withMockedFetch(mockFetch, async () => {
         result = await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          config,
+          CONFIG,
         );
       });
     });
@@ -809,18 +750,9 @@ test(
         // endpoint to hit.
       },
     };
-    // No `perCharacter` handlers: the router's default fallback
-    // throws on any unexpected URL, so any per-character GET would
-    // surface as a thrown error captured in `result.errors`.
     const { fetch: mockFetch, calls } = makeRouter({ exportJson });
 
     const { db, store } = makeFirestoreStub();
-
-    const config = {
-      baseUrl: "https://lm.example",
-      eventSlug: "crucible",
-      sessionId: "stub-session-id",
-    } as unknown as LarpManagerSyncConfig;
 
     let result: LarpManagerSyncResult | undefined;
     await withCapturedLogs(async () => {
@@ -828,7 +760,7 @@ test(
         result = await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          config,
+          CONFIG,
         );
       });
     });
@@ -858,7 +790,6 @@ test(
       "no per-character endpoint may be hit for a uuid-less character",
     );
 
-    // docId for a uuid-less character is `n{numKey}` per sync.ts.
     const doc = store.get(`${MIRROR_COLL}/n42`) as Record<string, unknown>;
     assert.ok(doc, "mirror doc must still be written (export-only row)");
     assert.equal(
@@ -886,7 +817,6 @@ test(
     const uuid = "char00012ccc";
     const exportJson = {
       "1": exportEntry({ number: 1, uuid, name: "Zoe" }),
->>>>>>> 8714d9d (feat(larpmanager): remove fetchDetails toggle (Task 012))
     };
     const { fetch: mockFetch } = makeRouter({
       exportJson,
@@ -894,41 +824,102 @@ test(
         [uuid]: {
           inventory: (u) => jsonResponse({ items: [] }, u),
           abilities: (u) => jsonResponse({ abilities: [] }, u),
-<<<<<<< HEAD
-          sheet: (u) => htmlResponse(SHEET_HTML_WITH_BODY, u),
-=======
           sheet: (u) => htmlResponse(SHEET_HTML_OK, u),
->>>>>>> 8714d9d (feat(larpmanager): remove fetchDetails toggle (Task 012))
         },
       },
     });
 
     const { db, store } = makeFirestoreStub();
-<<<<<<< HEAD
-=======
 
-    const config = {
-      baseUrl: "https://lm.example",
-      eventSlug: "crucible",
-      sessionId: "stub-session-id",
-    } as unknown as LarpManagerSyncConfig;
-
->>>>>>> 8714d9d (feat(larpmanager): remove fetchDetails toggle (Task 012))
     await withCapturedLogs(async () => {
       await withMockedFetch(mockFetch, async () => {
         await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-<<<<<<< HEAD
-          CONFIG_DETAILS
-=======
-          config,
->>>>>>> 8714d9d (feat(larpmanager): remove fetchDetails toggle (Task 012))
+          CONFIG,
         );
       });
     });
 
-<<<<<<< HEAD
+    const summary = store.get(SUMMARY_DOC) as Record<string, unknown>;
+    assert.ok(summary, "summary doc must be written");
+    assert.equal(
+      "fetchDetails" in summary,
+      false,
+      "after Task 012 the summary doc must NOT include a fetchDetails key " +
+        "(the field is removed from the write entirely)",
+    );
+    assert.equal(typeof summary["exportSha256"], "string");
+    assert.equal(typeof summary["characterCount"], "number");
+  }
+);
+
+// --- Task 014: sheet.body write-through ----------------------------------
+//
+// `runLarpManagerSync` already writes `row.sheet = parseCharacterSheetHtml(html)`
+// for each character. Task 014 adds an optional `body` field to that
+// projection. This test pins that when the per-character HTML carries a
+// `<div class="sheet">` block with `<h3>` ability groups, the mirror doc
+// the sync writes has `sheet.body.abilityGroups` non-empty — i.e. the
+// new field rides through `parseCharacterSheetHtml → row.sheet` to
+// Firestore with NO changes to `sync.ts`.
+
+const SHEET_HTML_WITH_BODY = [
+  "<!DOCTYPE html>",
+  "<html><body>",
+  '  <div class="character">',
+  '    <div class="presentation">',
+  '      <div class="first">',
+  '        <div class="go-inline"><b>Player:&nbsp;</b>Player 1</div>',
+  "      </div>",
+  "    </div>",
+  '    <div class="sheet">',
+  "      <h2>Abilities</h2>",
+  "      <h3>Common Skills</h3>",
+  '      <table class="mob abilities">',
+  "        <tbody><tr>",
+  "          <th><h4>Block (1)</h4></th>",
+  "          <td><p>Block one attack.</p></td>",
+  "        </tr></tbody>",
+  "      </table>",
+  "    </div>",
+  "  </div>",
+  "</body></html>",
+].join("\n");
+
+test(
+  "runLarpManagerSync (Task 014): when the per-character HTML carries a " +
+    "<div class=\"sheet\"> block with <h3> ability groups, the mirror doc " +
+    "has sheet.body.abilityGroups non-empty (write-through of the new " +
+    "parser field, no sync.ts code change)",
+  async () => {
+    const uuid = "char00014aaa";
+    const exportJson = {
+      "1": exportEntry({ number: 1, uuid, name: "Heldrek" }),
+    };
+    const { fetch: mockFetch } = makeRouter({
+      exportJson,
+      perCharacter: {
+        [uuid]: {
+          inventory: (u) => jsonResponse({ items: [] }, u),
+          abilities: (u) => jsonResponse({ abilities: [] }, u),
+          sheet: (u) => htmlResponse(SHEET_HTML_WITH_BODY, u),
+        },
+      },
+    });
+
+    const { db, store } = makeFirestoreStub();
+
+    await withCapturedLogs(async () => {
+      await withMockedFetch(mockFetch, async () => {
+        await runLarpManagerSync(
+          db as unknown as admin.firestore.Firestore,
+          TENANT,
+          CONFIG,
+        );
+      });
+    });
+
     const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
     assert.ok(doc, "mirror doc must exist");
     const sheet = doc["sheet"] as
@@ -941,37 +932,23 @@ test(
     assert.ok(sheet, "row.sheet must be populated");
     assert.ok(
       sheet!.body,
-      "sheet.body must be populated when the HTML carries a body block"
+      "sheet.body must be populated when the HTML carries a body block",
     );
     const groups = sheet!.body!.abilityGroups ?? [];
     assert.ok(
       groups.length >= 1,
       "sheet.body.abilityGroups must be non-empty when the HTML has at " +
-        "least one <h3> group"
+        "least one <h3> group",
     );
     assert.equal(
       groups[0]!.label,
       "Common Skills",
-      "first group label rides through verbatim"
+      "first group label rides through verbatim",
     );
     assert.equal(
       groups[0]!.abilities.length,
       1,
-      "the single <h3>'s row count is preserved end-to-end"
+      "the single <h3>'s row count is preserved end-to-end",
     );
-=======
-    const summary = store.get(SUMMARY_DOC) as Record<string, unknown>;
-    assert.ok(summary, "summary doc must be written");
-    assert.equal(
-      "fetchDetails" in summary,
-      false,
-      "after Task 012 the summary doc must NOT include a fetchDetails key " +
-        "(the field is removed from the write entirely)",
-    );
-    // Sanity: the other summary fields still get written so we know we
-    // hit the summary write path, not a no-op.
-    assert.equal(typeof summary["exportSha256"], "string");
-    assert.equal(typeof summary["characterCount"], "number");
->>>>>>> 8714d9d (feat(larpmanager): remove fetchDetails toggle (Task 012))
   }
 );
