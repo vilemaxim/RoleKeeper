@@ -8,8 +8,22 @@ import '../services/larp_manager_registration_service.dart';
 import '../utils/error_reporting.dart';
 
 /// Organizer setup: LarpManager connection + dedicated service account credentials.
+///
+/// Task 012 (`docs/adr/0001-remove-fetchdetails-toggle.md`) removed the
+/// "Fetch inventory & abilities JSON" toggle that used to live in the
+/// Advanced options expander. Admin sync is always full; there is no
+/// per-game knob.
 class LarpManagerIntegrationScreen extends StatefulWidget {
-  const LarpManagerIntegrationScreen({super.key});
+  const LarpManagerIntegrationScreen({
+    super.key,
+    this.repository,
+  });
+
+  /// Optional injection point so widget tests can drive the screen
+  /// against a [FakeFirebaseFirestore]-backed repository without
+  /// booting Firebase. Production callers pass `null` and the screen
+  /// builds the default singleton-backed repository in [State.initState].
+  final LarpManagerIntegrationRepository? repository;
 
   @override
   State<LarpManagerIntegrationScreen> createState() =>
@@ -18,14 +32,14 @@ class LarpManagerIntegrationScreen extends StatefulWidget {
 
 class _LarpManagerIntegrationScreenState
     extends State<LarpManagerIntegrationScreen> {
-  final _repo = LarpManagerIntegrationRepository();
+  late final LarpManagerIntegrationRepository _repo =
+      widget.repository ?? LarpManagerIntegrationRepository();
   final _baseUrl = TextEditingController();
   final _eventSlug = TextEditingController();
   final _loginPath = TextEditingController(text: '/login/');
   final _username = TextEditingController();
   final _password = TextEditingController();
 
-  bool _fetchDetails = false;
   bool _loading = true;
   bool _saving = false;
   bool _hadCredentials = false;
@@ -33,8 +47,14 @@ class _LarpManagerIntegrationScreenState
   String? _feedbackMessage;
   bool _feedbackIsError = false;
 
-  final _saveService = LarpManagerIntegrationSaveService();
-  final _statusService = LarpManagerIntegrationStatusService();
+  // `_saveService` and `_statusService` are intentionally `late final`
+  // so the Firebase-backed defaults aren't instantiated until Save is
+  // actually pressed. The screen's initial render and `_load()` only
+  // need `_repo`; widget tests can therefore render the screen with an
+  // injected `repository:` and a `FakeFirebaseFirestore`-backed repo
+  // without booting Firebase.
+  late final _saveService = LarpManagerIntegrationSaveService();
+  late final _statusService = LarpManagerIntegrationStatusService();
 
   @override
   void initState() {
@@ -77,9 +97,8 @@ class _LarpManagerIntegrationScreenState
         _baseUrl.text = baseUrl;
         _eventSlug.text = eventSlug;
         _loginPath.text = loginPath;
-        _fetchDetails = c.fetchDetails;
         _hadCredentials = c.credentialsConfigured;
-        _advancedExpanded = loginPath != '/login/' || c.fetchDetails;
+        _advancedExpanded = loginPath != '/login/';
         _loading = false;
       });
     } catch (e, st) {
@@ -193,7 +212,6 @@ class _LarpManagerIntegrationScreenState
         loginPath: _loginPath.text.trim().isEmpty
             ? '/login/'
             : _loginPath.text.trim(),
-        fetchDetails: _fetchDetails,
         username: u.isNotEmpty ? u : null,
         password: p.isNotEmpty ? p : null,
       );
@@ -479,7 +497,7 @@ class _LarpManagerIntegrationScreenState
                   onExpansionChanged: (v) =>
                       setState(() => _advancedExpanded = v),
                   title: const Text('Advanced options'),
-                  subtitle: const Text('Login path and extra JSON fetches'),
+                  subtitle: const Text('Login path'),
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -519,15 +537,6 @@ class _LarpManagerIntegrationScreenState
                         ),
                       ),
                     ],
-                    const SizedBox(height: 8),
-                    SwitchListTile(
-                      title: const Text('Fetch inventory & abilities JSON'),
-                      subtitle: const Text(
-                        'Extra request per character; turn off if you only need names.',
-                      ),
-                      value: _fetchDetails,
-                      onChanged: (v) => setState(() => _fetchDetails = v),
-                    ),
                     const SizedBox(height: 8),
                   ],
                 ),

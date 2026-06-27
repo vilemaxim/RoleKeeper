@@ -26,11 +26,13 @@
  *      in `errors[]` AND the row's export/abilities/inventory are
  *      still committed (`detailsFetched` still increments for that
  *      character).
- *   4. `fetchDetails: false` short-circuits the sheet fetch: zero
- *      HTTP hits on `/character/{uuid}/`, and `sheetsFetched === 0`.
- *   5. `LarpManagerSyncResult` exposes `sheetsFetched` typed as
+ *   4. `LarpManagerSyncResult` exposes `sheetsFetched` typed as
  *      `number` (compile-pinned via a literal object construction —
  *      no `any` casts).
+ *
+ * (Task 012 / ADR 0001 removed the `fetchDetails: false short-circuits
+ * the sheet fetch` test that used to live here — admin sync is now
+ * always full and the toggle no longer exists.)
  *
  * No network. No real Firestore. No firebase-admin app init required
  * — `admin.firestore.FieldValue.serverTimestamp()` is a pure sentinel
@@ -54,16 +56,10 @@ const BASE = gameEventBase(TENANT);
 const MIRROR_COLL = `${BASE}/larpManagerMirrorChars`;
 const SUMMARY_DOC = `${BASE}/larpManagerMirrorMeta/summary`;
 
-const CONFIG_DETAILS: LarpManagerSyncConfig = {
+const CONFIG: LarpManagerSyncConfig = {
   baseUrl: "https://lm.example",
   eventSlug: "crucible",
   sessionId: "stub-session-id",
-  fetchDetails: true,
-};
-
-const CONFIG_NO_DETAILS: LarpManagerSyncConfig = {
-  ...CONFIG_DETAILS,
-  fetchDetails: false,
 };
 
 /**
@@ -269,7 +265,7 @@ test(
         result = await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_DETAILS
+          CONFIG
         );
       });
     });
@@ -358,7 +354,7 @@ test(
         result = await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_DETAILS
+          CONFIG
         );
       });
     });
@@ -450,7 +446,7 @@ test(
         result = await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_DETAILS
+          CONFIG
         );
       });
     });
@@ -490,80 +486,10 @@ test(
   }
 );
 
-test(
-  "runLarpManagerSync (Task 009): fetchDetails:false skips the sheet fetch " +
-    "entirely and sheetsFetched stays 0",
-  async () => {
-    const uuid = "char00000ddd";
-    const exportJson = {
-      "1": exportEntry({ number: 1, uuid, name: "Eclipse" }),
-    };
-    const { fetch: mockFetch, calls } = makeRouter({
-      exportJson,
-      perCharacter: {
-        [uuid]: {
-          sheet: (u) => {
-            throw new Error(
-              `sheet endpoint must NOT be hit when fetchDetails:false (url=${u})`
-            );
-          },
-          inventory: (u) => {
-            throw new Error(
-              `inventory endpoint must NOT be hit when fetchDetails:false (url=${u})`
-            );
-          },
-          abilities: (u) => {
-            throw new Error(
-              `abilities endpoint must NOT be hit when fetchDetails:false (url=${u})`
-            );
-          },
-        },
-      },
-    });
-
-    const { db, store } = makeFirestoreStub();
-
-    let result: LarpManagerSyncResult | undefined;
-    await withCapturedLogs(async () => {
-      await withMockedFetch(mockFetch, async () => {
-        result = await runLarpManagerSync(
-          db as unknown as admin.firestore.Firestore,
-          TENANT,
-          CONFIG_NO_DETAILS
-        );
-      });
-    });
-
-    assert.ok(result, "runLarpManagerSync should resolve");
-    assert.equal(result!.detailsFetched, 0, "no inventory/abilities pulled");
-    assert.equal(
-      result!.sheetsFetched,
-      0,
-      "sheetsFetched must be 0 when fetchDetails is false"
-    );
-    assert.deepEqual(result!.errors, []);
-
-    const sheetHits = calls.filter(
-      (c) =>
-        c.method === "GET" &&
-        /\/character\/[^/]+\/$/.test(c.url) &&
-        c.url.includes(uuid)
-    );
-    assert.equal(
-      sheetHits.length,
-      0,
-      "no GET to /character/{uuid}/ when fetchDetails is false"
-    );
-
-    const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
-    assert.ok(doc, "mirror doc still written (export only) when fetchDetails false");
-    assert.equal(
-      (doc as { sheet?: unknown }).sheet,
-      undefined,
-      "no sheet field on the mirror doc when fetchDetails is false"
-    );
-  }
-);
+// Task 012 / ADR 0001: the `runLarpManagerSync (Task 009):
+// fetchDetails:false skips the sheet fetch entirely and sheetsFetched
+// stays 0` test that previously lived here has been removed because the
+// scenario it tested no longer exists — admin sync is always full.
 
 test(
   "LarpManagerSyncResult (Task 009): the type exposes sheetsFetched as a " +
@@ -589,15 +515,21 @@ test(
 // LM HTML is preserved verbatim inside the row's `export.teaser` so
 // future consumers of the bulk-export dump still see what LM emitted.
 
+// Task 012 / ADR 0001 note: the export entries below intentionally
+// have NO `uuid` field. The teaser-projection logic is independent of
+// uuid, and Task 012 removed the `fetchDetails` gate so any
+// uuid-bearing entry now triggers a per-character HTTP round-trip
+// that these focused teaser tests don't want to mock. Without a uuid
+// the per-character fetch is skipped and the row's docId falls back
+// to `n{numKey}` per sync.ts.
+
 test(
   "runLarpManagerSync (Task 011): teaser HTML in the LM export becomes " +
     "plain text on the mirror doc; row.export.teaser keeps the raw HTML",
   async () => {
-    const uuid = "char00011aaa";
     const exportJson = {
       "1": {
         number: 1,
-        uuid,
         name: "Heldrek",
         teaser: "<p>Fire Mage</p>",
       },
@@ -611,12 +543,12 @@ test(
         await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_NO_DETAILS
+          CONFIG
         );
       });
     });
 
-    const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
+    const doc = store.get(`${MIRROR_COLL}/n1`) as Record<string, unknown>;
     assert.ok(doc, "mirror doc must exist");
     assert.equal(
       doc["teaser"],
@@ -636,11 +568,9 @@ test(
   "runLarpManagerSync (Task 011): a teaser that strips to empty " +
     "(<p>   </p>) results in NO top-level teaser key on the mirror doc",
   async () => {
-    const uuid = "char00011bbb";
     const exportJson = {
       "1": {
         number: 1,
-        uuid,
         name: "Heldrek",
         teaser: "<p>   </p>",
       },
@@ -654,12 +584,12 @@ test(
         await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_NO_DETAILS
+          CONFIG
         );
       });
     });
 
-    const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
+    const doc = store.get(`${MIRROR_COLL}/n1`) as Record<string, unknown>;
     assert.ok(doc, "mirror doc must exist");
     assert.equal(
       "teaser" in doc,
@@ -680,11 +610,9 @@ test(
   "runLarpManagerSync (Task 011): an LM export entry with no teaser " +
     "key at all results in NO top-level teaser key on the mirror doc",
   async () => {
-    const uuid = "char00011ccc";
     const exportJson = {
       "1": {
         number: 1,
-        uuid,
         name: "Heldrek",
         // teaser intentionally omitted.
       },
@@ -698,12 +626,12 @@ test(
         await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_NO_DETAILS
+          CONFIG
         );
       });
     });
 
-    const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
+    const doc = store.get(`${MIRROR_COLL}/n1`) as Record<string, unknown>;
     assert.ok(doc, "mirror doc must exist");
     assert.equal(
       "teaser" in doc,
@@ -711,6 +639,218 @@ test(
       "top-level teaser key must be OMITTED when the LM export entry has " +
         "no teaser at all",
     );
+  }
+);
+
+// --- Task 012: remove fetchDetails toggle; admin sync is always full ------
+//
+// After Task 012 there is exactly one sync mode: always full. Every
+// uuid-bearing character gets its inventory, abilities, AND parsed HTML
+// sheet fetched on every admin/scheduled sync. The `fetchDetails`
+// toggle is gone from `LarpManagerSyncConfig`, from
+// `runLarpManagerSync`'s gating logic, and from the
+// `larpManagerMirrorMeta/summary` doc write.
+
+test(
+  "runLarpManagerSync (Task 012): a uuid-bearing character ALWAYS " +
+    "triggers all three per-character endpoints (inventory, abilities, " +
+    "sheet) — no fetchDetails toggle required — the mirror doc gains " +
+    "inventory + abilities + sheet, detailsFetched === 1, sheetsFetched === 1",
+  async () => {
+    const uuid = "char00012aaa";
+    const exportJson = {
+      "1": exportEntry({ number: 1, uuid, name: "Vanessa" }),
+    };
+    const { fetch: mockFetch, calls } = makeRouter({
+      exportJson,
+      perCharacter: {
+        [uuid]: {
+          inventory: (u) => jsonResponse({ items: [] }, u),
+          abilities: (u) => jsonResponse({ abilities: [] }, u),
+          sheet: (u) => htmlResponse(SHEET_HTML_OK, u),
+        },
+      },
+    });
+
+    const { db, store } = makeFirestoreStub();
+
+    let result: LarpManagerSyncResult | undefined;
+    await withCapturedLogs(async () => {
+      await withMockedFetch(mockFetch, async () => {
+        result = await runLarpManagerSync(
+          db as unknown as admin.firestore.Firestore,
+          TENANT,
+          CONFIG,
+        );
+      });
+    });
+
+    assert.ok(result, "runLarpManagerSync should resolve");
+    assert.equal(
+      result!.detailsFetched,
+      1,
+      "detailsFetched must be 1 (inventory+abilities pair counted) " +
+        "with no fetchDetails toggle",
+    );
+    assert.equal(
+      result!.sheetsFetched,
+      1,
+      "sheetsFetched must be 1 with no fetchDetails toggle",
+    );
+    assert.deepEqual(result!.errors, [], "no errors expected on happy path");
+
+    const inventoryCalls = calls.filter((c) =>
+      /\/character\/[^/]+\/inventory\//.test(c.url),
+    );
+    const abilitiesCalls = calls.filter((c) =>
+      /\/character\/[^/]+\/abilities\//.test(c.url),
+    );
+    const sheetCalls = calls.filter(
+      (c) => /\/character\/[^/]+\/$/.test(c.url) && c.url.includes(uuid),
+    );
+    assert.equal(
+      inventoryCalls.length,
+      1,
+      "exactly one GET to /character/{uuid}/inventory/",
+    );
+    assert.equal(
+      abilitiesCalls.length,
+      1,
+      "exactly one GET to /character/{uuid}/abilities/",
+    );
+    assert.equal(
+      sheetCalls.length,
+      1,
+      "exactly one GET to /character/{uuid}/ (HTML sheet)",
+    );
+
+    const doc = store.get(`${MIRROR_COLL}/${uuid}`) as Record<string, unknown>;
+    assert.ok(doc, `mirror doc must exist at ${MIRROR_COLL}/${uuid}`);
+    assert.ok(doc["inventory"], "row.inventory must be written");
+    assert.ok(doc["abilities"], "row.abilities must be written");
+    const sheet = (doc as { sheet?: { sections?: unknown[] } }).sheet;
+    assert.ok(
+      sheet?.sections !== undefined,
+      "row.sheet.sections must be written from parseCharacterSheetHtml",
+    );
+  }
+);
+
+test(
+  "runLarpManagerSync (Task 012): a character with NO uuid does NOT " +
+    "trigger any per-character endpoints, and the mirror doc has no " +
+    "sheet / inventory / abilities field (uuid guard still in place)",
+  async () => {
+    const exportJson = {
+      "42": {
+        number: 42,
+        name: "Nameless",
+        teaser: "ghost",
+        // uuid intentionally omitted — character has no per-character
+        // endpoint to hit.
+      },
+    };
+    const { fetch: mockFetch, calls } = makeRouter({ exportJson });
+
+    const { db, store } = makeFirestoreStub();
+
+    let result: LarpManagerSyncResult | undefined;
+    await withCapturedLogs(async () => {
+      await withMockedFetch(mockFetch, async () => {
+        result = await runLarpManagerSync(
+          db as unknown as admin.firestore.Firestore,
+          TENANT,
+          CONFIG,
+        );
+      });
+    });
+
+    assert.ok(result, "runLarpManagerSync should resolve");
+    assert.deepEqual(
+      result!.errors,
+      [],
+      "uuid-less character must not produce any errors (no per-character " +
+        "fetch attempted)",
+    );
+    assert.equal(
+      result!.detailsFetched,
+      0,
+      "detailsFetched must be 0 for a uuid-less character",
+    );
+    assert.equal(
+      result!.sheetsFetched,
+      0,
+      "sheetsFetched must be 0 for a uuid-less character",
+    );
+
+    const perCharCalls = calls.filter((c) => /\/character\//.test(c.url));
+    assert.equal(
+      perCharCalls.length,
+      0,
+      "no per-character endpoint may be hit for a uuid-less character",
+    );
+
+    const doc = store.get(`${MIRROR_COLL}/n42`) as Record<string, unknown>;
+    assert.ok(doc, "mirror doc must still be written (export-only row)");
+    assert.equal(
+      (doc as { sheet?: unknown }).sheet,
+      undefined,
+      "no sheet field for uuid-less character",
+    );
+    assert.equal(
+      (doc as { inventory?: unknown }).inventory,
+      undefined,
+      "no inventory field for uuid-less character",
+    );
+    assert.equal(
+      (doc as { abilities?: unknown }).abilities,
+      undefined,
+      "no abilities field for uuid-less character",
+    );
+  }
+);
+
+test(
+  "runLarpManagerSync (Task 012): the larpManagerMirrorMeta/summary doc " +
+    "written at the end of a sync has NO fetchDetails field",
+  async () => {
+    const uuid = "char00012ccc";
+    const exportJson = {
+      "1": exportEntry({ number: 1, uuid, name: "Zoe" }),
+    };
+    const { fetch: mockFetch } = makeRouter({
+      exportJson,
+      perCharacter: {
+        [uuid]: {
+          inventory: (u) => jsonResponse({ items: [] }, u),
+          abilities: (u) => jsonResponse({ abilities: [] }, u),
+          sheet: (u) => htmlResponse(SHEET_HTML_OK, u),
+        },
+      },
+    });
+
+    const { db, store } = makeFirestoreStub();
+
+    await withCapturedLogs(async () => {
+      await withMockedFetch(mockFetch, async () => {
+        await runLarpManagerSync(
+          db as unknown as admin.firestore.Firestore,
+          TENANT,
+          CONFIG,
+        );
+      });
+    });
+
+    const summary = store.get(SUMMARY_DOC) as Record<string, unknown>;
+    assert.ok(summary, "summary doc must be written");
+    assert.equal(
+      "fetchDetails" in summary,
+      false,
+      "after Task 012 the summary doc must NOT include a fetchDetails key " +
+        "(the field is removed from the write entirely)",
+    );
+    assert.equal(typeof summary["exportSha256"], "string");
+    assert.equal(typeof summary["characterCount"], "number");
   }
 );
 
@@ -769,12 +909,13 @@ test(
     });
 
     const { db, store } = makeFirestoreStub();
+
     await withCapturedLogs(async () => {
       await withMockedFetch(mockFetch, async () => {
         await runLarpManagerSync(
           db as unknown as admin.firestore.Firestore,
           TENANT,
-          CONFIG_DETAILS
+          CONFIG,
         );
       });
     });
@@ -791,23 +932,23 @@ test(
     assert.ok(sheet, "row.sheet must be populated");
     assert.ok(
       sheet!.body,
-      "sheet.body must be populated when the HTML carries a body block"
+      "sheet.body must be populated when the HTML carries a body block",
     );
     const groups = sheet!.body!.abilityGroups ?? [];
     assert.ok(
       groups.length >= 1,
       "sheet.body.abilityGroups must be non-empty when the HTML has at " +
-        "least one <h3> group"
+        "least one <h3> group",
     );
     assert.equal(
       groups[0]!.label,
       "Common Skills",
-      "first group label rides through verbatim"
+      "first group label rides through verbatim",
     );
     assert.equal(
       groups[0]!.abilities.length,
       1,
-      "the single <h3>'s row count is preserved end-to-end"
+      "the single <h3>'s row count is preserved end-to-end",
     );
   }
 );

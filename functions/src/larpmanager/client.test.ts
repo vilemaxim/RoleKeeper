@@ -110,7 +110,6 @@ test(
           eventSlug: "crucible",
           username: "svc",
           password: "wrong",
-          fetchDetails: false,
         }),
         /login did not authenticate.*re-displayed the login form/i
       );
@@ -157,7 +156,6 @@ test(
         eventSlug: "crucible",
         username: "svc",
         password: "right",
-        fetchDetails: false,
       });
       assert.equal(jar.get("sessionid"), "authenticated-2");
     });
@@ -196,7 +194,6 @@ test(
           eventSlug: "crucible",
           username: "svc",
           password: "right",
-          fetchDetails: false,
         }),
         /did not set a sessionid cookie/i
       );
@@ -215,7 +212,6 @@ test(
         baseUrl: "https://lm.example",
         eventSlug: "crucible",
         sessionId: "preset-session-id",
-        fetchDetails: false,
       });
       assert.equal(jar.get("sessionid"), "preset-session-id");
     });
@@ -254,7 +250,6 @@ test(
           baseUrl: "https://lm.example",
           eventSlug: "crucible",
           sessionId: "active-1",
-          fetchDetails: false,
         },
         jar,
         "oxe9sb0w02ig"
@@ -303,7 +298,6 @@ test(
               baseUrl: "https://lm.example",
               eventSlug: "crucible",
               sessionId: "active-1",
-              fetchDetails: false,
             },
             jar,
             "missing00uuid"

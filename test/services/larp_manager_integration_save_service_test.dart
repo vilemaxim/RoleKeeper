@@ -15,7 +15,6 @@ void main() {
         baseUrl: 'https://lm.example.com',
         larpManagerEventSlug: 'lm-export-slug',
         loginPath: '/login/',
-        fetchDetails: true,
         username: 'bot',
         password: 'secret',
       );
@@ -33,10 +32,37 @@ void main() {
         baseUrl: 'https://lm.example.com',
         larpManagerEventSlug: 'wrong-run',
         loginPath: '/login/',
-        fetchDetails: false,
       );
       expect(payload['gameId'], contains('canonical-run'));
       expect(payload['eventSlug'], 'wrong-run');
+    });
+
+    // Task 012 (docs/adr/0001-remove-fetchdetails-toggle.md): the
+    // payload posted to `saveLarpManagerIntegrationConfig` no longer
+    // carries `fetchDetails`. Admin sync is always full — there is no
+    // toggle to round-trip.
+    test('Task 012: payload contains no fetchDetails key', () {
+      final payload = LarpManagerIntegrationSaveService().buildCallablePayload(
+        tenant: tenant,
+        baseUrl: 'https://lm.example.com',
+        larpManagerEventSlug: 'lm-export-slug',
+        loginPath: '/login/',
+        username: 'bot',
+        password: 'secret',
+      );
+
+      expect(
+        payload.containsKey('fetchDetails'),
+        isFalse,
+        reason:
+            'After Task 012 the save payload must NOT include a fetchDetails '
+            'key — the field is gone from the save service signature entirely.',
+      );
+      // Sanity: the other fields still round-trip so we know we hit the
+      // payload builder, not a no-op stub.
+      expect(payload['baseUrl'], 'https://lm.example.com');
+      expect(payload['eventSlug'], 'lm-export-slug');
+      expect(payload['loginPath'], '/login/');
     });
   });
 }

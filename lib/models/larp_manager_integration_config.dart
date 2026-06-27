@@ -1,24 +1,27 @@
 /// Non-sensitive LarpManager connection fields (Firestore). Credentials live in Secret Manager.
+///
+/// Task 012 (`docs/adr/0001-remove-fetchdetails-toggle.md`) removed the
+/// `fetchDetails` field. Admin sync is always full. `fromMap` still
+/// tolerates a legacy `fetchDetails: bool` key in the stored Firestore
+/// doc — we did not run a Firestore migration to delete the stale field
+/// — but the value is silently ignored and never surfaced on the model.
 class LarpManagerIntegrationConfig {
   const LarpManagerIntegrationConfig({
     required this.baseUrl,
     required this.eventSlug,
     required this.loginPath,
-    required this.fetchDetails,
     required this.credentialsConfigured,
   });
 
   final String baseUrl;
   final String eventSlug;
   final String loginPath;
-  final bool fetchDetails;
   final bool credentialsConfigured;
 
   static const empty = LarpManagerIntegrationConfig(
     baseUrl: '',
     eventSlug: '',
     loginPath: '/login/',
-    fetchDetails: false,
     credentialsConfigured: false,
   );
 
@@ -30,7 +33,6 @@ class LarpManagerIntegrationConfig {
       loginPath: (m['loginPath'] as String?)?.trim().isNotEmpty == true
           ? (m['loginPath'] as String).trim()
           : '/login/',
-      fetchDetails: m['fetchDetails'] == true,
       credentialsConfigured: m['credentialsConfigured'] == true,
     );
   }

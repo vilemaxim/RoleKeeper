@@ -25,7 +25,6 @@ const BASE = gameEventBase(TENANT);
 const CONFIG: LarpManagerSyncConfig = {
   baseUrl: "https://lm.example",
   eventSlug: "evt1",
-  fetchDetails: false,
 };
 const UID = "user-1";
 const EMAIL = "player@example.com";
@@ -35,7 +34,6 @@ test("buildCharacterCreatePageUrl", () => {
   const cfg: LarpManagerSyncConfig = {
     baseUrl: "https://lm.example/",
     eventSlug: "my-event-1",
-    fetchDetails: false,
   };
   assert.equal(
     buildCharacterCreatePageUrl(cfg),

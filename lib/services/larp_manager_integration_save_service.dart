@@ -15,12 +15,15 @@ class LarpManagerIntegrationSaveService {
       _functions ?? FirebaseFunctions.instanceFor(region: functionsRegion);
 
   /// Callable body: [gameId] selects the RoleKeeper tenant; [eventSlug] is the LM run slug.
+  ///
+  /// Task 012 (`docs/adr/0001-remove-fetchdetails-toggle.md`) removed
+  /// the `fetchDetails` field from this payload — admin sync is always
+  /// full now, so there is no toggle to round-trip.
   Map<String, dynamic> buildCallablePayload({
     required GameTenantRef tenant,
     required String baseUrl,
     required String larpManagerEventSlug,
     required String loginPath,
-    required bool fetchDetails,
     String? username,
     String? password,
   }) {
@@ -30,7 +33,6 @@ class LarpManagerIntegrationSaveService {
       'baseUrl': baseUrl,
       'eventSlug': larpManagerEventSlug,
       'loginPath': loginPath,
-      'fetchDetails': fetchDetails,
       if (username != null && username.isNotEmpty) 'username': username,
       if (password != null && password.isNotEmpty) 'password': password,
     };
@@ -41,7 +43,6 @@ class LarpManagerIntegrationSaveService {
     required String baseUrl,
     required String larpManagerEventSlug,
     required String loginPath,
-    required bool fetchDetails,
     String? username,
     String? password,
   }) async {
@@ -53,7 +54,6 @@ class LarpManagerIntegrationSaveService {
         baseUrl: baseUrl,
         larpManagerEventSlug: larpManagerEventSlug,
         loginPath: loginPath,
-        fetchDetails: fetchDetails,
         username: username,
         password: password,
       ),

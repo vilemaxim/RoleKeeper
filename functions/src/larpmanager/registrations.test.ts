@@ -78,7 +78,6 @@ test("buildRegistrationPageUrl", () => {
   const cfg: LarpManagerSyncConfig = {
     baseUrl: "https://lm.example/",
     eventSlug: "my-event-1",
-    fetchDetails: false,
   };
   assert.equal(
     buildRegistrationPageUrl(cfg),

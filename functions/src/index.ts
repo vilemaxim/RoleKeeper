@@ -357,7 +357,6 @@ export const saveLarpManagerIntegrationConfig = onCall(
         eventSlug?: string;
         baseUrl?: string;
         loginPath?: string;
-        fetchDetails?: boolean;
         username?: string;
         password?: string;
       };
@@ -404,7 +403,6 @@ export const saveLarpManagerIntegrationConfig = onCall(
 
       const loginPath =
         String(data.loginPath ?? "/login/").trim() || "/login/";
-      const fetchDetails = data.fetchDetails === true;
 
       const u = typeof data.username === "string" ? data.username.trim() : "";
       const p = typeof data.password === "string" ? data.password : "";
@@ -448,12 +446,15 @@ export const saveLarpManagerIntegrationConfig = onCall(
         );
       }
 
+      // Task 012 / ADR 0001: no `fetchDetails` key on the saved payload.
+      // Legacy `fetchDetails: bool` on existing docs is tolerated by the
+      // loader (`parseIntegrationDoc`) and is overwritten on next save
+      // here only insofar as merge writes leave untouched fields alone.
       await intRef.set(
         {
           baseUrl,
           eventSlug,
           loginPath,
-          fetchDetails,
           credentialsConfigured: hadCreds || secretUpdated,
           tenantKey: tKey,
           instanceId: tenant.instanceId,

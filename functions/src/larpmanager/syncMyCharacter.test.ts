@@ -72,7 +72,6 @@ const CONFIG: LarpManagerSyncConfig = {
   baseUrl: "https://lm.example",
   eventSlug: "crucible",
   sessionId: "stub-session-id",
-  fetchDetails: true,
 };
 
 // --- fetch mocking helpers (mirrors sync.test.ts) -------------------------

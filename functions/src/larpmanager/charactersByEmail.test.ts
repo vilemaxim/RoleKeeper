@@ -288,7 +288,6 @@ test(
         eventSlug: "evt1",
         username: "svc",
         password: "x",
-        fetchDetails: false,
       }
     );
     assert.equal(result.skippedCache, true);
