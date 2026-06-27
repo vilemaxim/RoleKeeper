@@ -59,6 +59,12 @@ abstract final class GameFirestorePaths {
   ) =>
       eventDoc(db, tenant).collection('eventSession').doc('config');
 
+  static CollectionReference<Map<String, dynamic>> locationPings(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+  ) =>
+      eventDoc(db, tenant).collection('locationPings');
+
   static CollectionReference<Map<String, dynamic>> deathInterventionClaims(
     FirebaseFirestore db,
     GameTenantRef tenant,

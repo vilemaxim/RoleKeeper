@@ -22,16 +22,20 @@ class ActivityEventLocation {
     required this.longitude,
     this.accuracy,
     this.altitude,
+    this.source = 'gps',
   });
 
   final double latitude;
   final double longitude;
   final double? accuracy;
   final double? altitude;
+  /// Location provider: `gps` in v1; future `beacon`, `wifi`.
+  final String source;
 
   Map<String, dynamic> toMap() => {
         'latitude': latitude,
         'longitude': longitude,
+        'source': source,
         if (accuracy != null && accuracy!.isFinite) 'accuracy': accuracy,
         if (altitude != null && altitude!.isFinite) 'altitude': altitude,
       };
@@ -47,6 +51,7 @@ class ActivityEventLocation {
         longitude: lng.toDouble(),
         accuracy: (map['accuracy'] as num?)?.toDouble(),
         altitude: (map['altitude'] as num?)?.toDouble(),
+        source: map['source'] as String? ?? 'gps',
       );
     }
     return null;

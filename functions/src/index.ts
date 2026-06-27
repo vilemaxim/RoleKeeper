@@ -4,7 +4,7 @@
 
 import * as crypto from "crypto";
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { logger } from "firebase-functions";
@@ -27,6 +27,11 @@ import {
   parseLarpManagerSyncSettings,
   shouldRunScheduledLarpManagerSync,
 } from "./larpmanager/syncSettings";
+import { sanitizeLocation as sanitizeLocationPayload } from "./location/locationPayload";
+import {
+  runRecordLocationPing,
+  type RecordLocationPingBody,
+} from "./location/recordLocationPing";
 
 admin.initializeApp();
 
@@ -56,21 +61,7 @@ function mintActiveEventDocId(ts: admin.firestore.Timestamp): string {
 function sanitizeLocation(
   loc: unknown
 ): Record<string, unknown> | undefined {
-  if (!loc || typeof loc !== "object") return undefined;
-  const o = loc as Record<string, unknown>;
-  const lat = o.latitude;
-  const lng = o.longitude;
-  if (typeof lat === "number" && typeof lng === "number") {
-    const out: Record<string, unknown> = { latitude: lat, longitude: lng };
-    if (typeof o.accuracy === "number" && Number.isFinite(o.accuracy)) {
-      out.accuracy = o.accuracy;
-    }
-    if (typeof o.altitude === "number" && Number.isFinite(o.altitude)) {
-      out.altitude = o.altitude;
-    }
-    return out;
-  }
-  return undefined;
+  return sanitizeLocationPayload(loc);
 }
 
 /**
@@ -734,4 +725,14 @@ export const checkLarpManagerRegistrationCallable = onCall(
       throw new HttpsError("internal", msg.slice(0, 500));
     }
   }
+);
+
+/** Records a GPS ping for an opted-in player during a live event. */
+export const recordLocationPing = onCall(
+  { region: REGION },
+  async (request) =>
+    runRecordLocationPing(
+      { db: admin.firestore() },
+      request as CallableRequest<RecordLocationPingBody>
+    )
 );

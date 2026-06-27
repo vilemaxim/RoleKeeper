@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -18,14 +20,17 @@ import '../services/auth_service.dart';
 import '../services/activity_events_service.dart';
 import '../services/character_status_service.dart';
 import '../services/death_timer_service.dart';
+import '../services/event_session_repository.dart';
 import '../services/game_context_service.dart';
 import '../services/game_membership_service.dart';
 import '../services/larp_manager_integration_status_service.dart';
 import '../services/larp_manager_registration_service.dart';
+import '../services/location_ping_service.dart';
 import '../services/location_tracking_rules_repository.dart';
 import '../services/member_presence_repository.dart';
 import '../services/user_profile_service.dart';
 import '../utils/error_reporting.dart';
+import '../utils/location_utils.dart';
 import '../widgets/lm_integration_setup_prompt.dart';
 
 /// Main home screen shown after sign-in.
@@ -47,6 +52,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _membershipService = GameMembershipService();
   final _registrationService = LarpManagerRegistrationService();
   final _lmStatusService = LarpManagerIntegrationStatusService();
+  final _locationPingService = LocationPingService();
+  final _locationRulesRepo = LocationTrackingRulesRepository();
+  final _eventSessionRepo = EventSessionRepository();
+  final _presenceRepo = MemberPresenceRepository();
+  StreamSubscription? _eventSessionSub;
   GameRole _gameRole = GameRole.player;
   LmIntegrationEvaluation? _lmEvaluation;
   bool _bootstrapDone = false;
@@ -61,7 +71,34 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _eventSessionSub = _eventSessionRepo.watch().listen((_) {
+      unawaited(_syncLocationPings());
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  @override
+  void dispose() {
+    _eventSessionSub?.cancel();
+    _locationPingService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _syncLocationPings() async {
+    try {
+      final rules = await _locationRulesRepo.get();
+      final session = await _eventSessionRepo.get();
+      final presence = await _presenceRepo.getPresence();
+      final granted = await LocationUtils.isWhenInUseGranted();
+      await _locationPingService.syncConditions(
+        rules: rules,
+        eventLive: session.isLive,
+        presence: presence,
+        locationPermissionGranted: granted,
+      );
+    } catch (e, st) {
+      debugPrint('HomeScreen._syncLocationPings: $e\n$st');
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -91,6 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
     await _checkDeathTimerOnLogin();
+    await _syncLocationPings();
   }
 
   /// Refreshes registration/LM status without blocking the first paint after cache hit.
@@ -598,8 +636,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (_hasCharacter || _gameRole.canConfigureDeathRules) ...[
                 const SizedBox(height: 32),
                 PlayerPresenceSettingsSection(
-                  presenceRepository: MemberPresenceRepository(),
-                  locationRulesRepository: LocationTrackingRulesRepository(),
+                  presenceRepository: _presenceRepo,
+                  locationRulesRepository: _locationRulesRepo,
+                  onPresenceUpdated: () => unawaited(_syncLocationPings()),
                 ),
                 const SizedBox(height: 24),
                 Card(

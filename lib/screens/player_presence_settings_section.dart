@@ -13,10 +13,13 @@ class PlayerPresenceSettingsSection extends StatefulWidget {
     super.key,
     required this.presenceRepository,
     required this.locationRulesRepository,
+    this.onPresenceUpdated,
   });
 
   final MemberPresenceRepository presenceRepository;
   final LocationTrackingRulesRepository locationRulesRepository;
+  /// Called after opt-in or presence state changes (e.g. to refresh ping timer).
+  final VoidCallback? onPresenceUpdated;
 
   @override
   State<PlayerPresenceSettingsSection> createState() =>
@@ -62,6 +65,7 @@ class _PlayerPresenceSettingsSectionState
     setState(() => _presence = _presence.copyWith(locationOptIn: value));
     try {
       await widget.presenceRepository.setLocationOptIn(value);
+      widget.onPresenceUpdated?.call();
     } catch (e, st) {
       final report =
           reportAppError('PlayerPresenceSettingsSection.locationOptIn', e, st);
@@ -80,6 +84,7 @@ class _PlayerPresenceSettingsSectionState
     setState(() => _presence = _presence.copyWith(presenceState: newState));
     try {
       await widget.presenceRepository.setPresenceState(newState);
+      widget.onPresenceUpdated?.call();
     } catch (e, st) {
       final report =
           reportAppError('PlayerPresenceSettingsSection.presenceState', e, st);
