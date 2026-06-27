@@ -156,6 +156,11 @@ service cloud.firestore {
           allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
         }
 
+        match /eventSession/{docId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+        }
+
         match /characters/{characterId} {
           allow create: if isAuthenticated()
             && isGameMember(instanceId, eventSlug)
