@@ -3,6 +3,43 @@ import 'package:flutter/foundation.dart';
 import 'location_utils.dart';
 import 'vibration_utils.dart';
 
+/// Overrides [kIsWeb] in tests for [requestStartupPermissions].
+@visibleForTesting
+bool? startupPermissionsDebugIsWeb;
+
+bool get _startupIsWeb => startupPermissionsDebugIsWeb ?? kIsWeb;
+
+/// Outcome of [requestLocationWhenNeeded].
+class LocationWhenNeededResult {
+  const LocationWhenNeededResult({required this.granted});
+
+  final bool granted;
+}
+
+/// Requests location permission when tracking needs it (not at app startup).
+///
+/// When [promptIfNeeded] is false, reports current grant state without prompting.
+/// When true, prompts the user (OS dialog or browser Geolocation API).
+/// Returns denied without throwing if the user declines.
+Future<LocationWhenNeededResult> requestLocationWhenNeeded({
+  bool promptIfNeeded = false,
+}) async {
+  if (await LocationUtils.isWhenInUseGranted()) {
+    return const LocationWhenNeededResult(granted: true);
+  }
+  if (!promptIfNeeded) {
+    return const LocationWhenNeededResult(granted: false);
+  }
+  final granted = await LocationUtils.requestWhenInUseIfNeeded();
+  if (!granted) {
+    return const LocationWhenNeededResult(granted: false);
+  }
+  if (!_startupIsWeb && !await LocationUtils.isLocationServiceEnabled()) {
+    return const LocationWhenNeededResult(granted: false);
+  }
+  return const LocationWhenNeededResult(granted: true);
+}
+
 /// Outcome of [requestStartupPermissions].
 class StartupPermissionsResult {
   const StartupPermissionsResult({
@@ -15,7 +52,9 @@ class StartupPermissionsResult {
   final bool vibrationReady;
   final bool locationServiceEnabled;
 
-  bool get allGranted => locationGranted && vibrationReady;
+  /// Startup gate: vibration/haptics only. Location is requested later via
+  /// [requestLocationWhenNeeded] when tracking is active.
+  bool get allGranted => vibrationReady;
 
   StartupPermissionsResult copyWith({
     bool? locationGranted,
@@ -25,38 +64,33 @@ class StartupPermissionsResult {
     return StartupPermissionsResult(
       locationGranted: locationGranted ?? this.locationGranted,
       vibrationReady: vibrationReady ?? this.vibrationReady,
-      locationServiceEnabled: locationServiceEnabled ?? this.locationServiceEnabled,
+      locationServiceEnabled:
+          locationServiceEnabled ?? this.locationServiceEnabled,
     );
   }
 }
 
-/// Asks for location (when in use) and validates vibration/haptics readiness.
-/// Call once at app launch (see [AppPermissionsWrapper]).
+/// Validates vibration/haptics readiness at app launch (see [AppPermissionsWrapper]).
+/// Location is not requested here; use [requestLocationWhenNeeded] when tracking
+/// needs coordinates.
 Future<StartupPermissionsResult> requestStartupPermissions() async {
-  // Avoid Geolocator permission channels on web (often MissingPluginException
-  // in `flutter run -d chrome`); the browser handles geolocation when used.
-  if (kIsWeb) {
+  if (_startupIsWeb) {
     return const StartupPermissionsResult(
-      locationGranted: true,
+      locationGranted: false,
       vibrationReady: true,
       locationServiceEnabled: true,
     );
   }
 
-  final serviceOn = await LocationUtils.isLocationServiceEnabled();
-  final loc = await LocationUtils.requestWhenInUseIfNeeded();
   final vib = await VibrationUtils.isVibrationCapabilitySatisfied();
 
-  // Web: no OS-level "location services" toggle like mobile GPS.
-  final locationOk = loc && (kIsWeb || serviceOn);
-
-  if (locationOk && vib) {
+  if (vib) {
     await VibrationUtils.vibrateShortPulse();
   }
 
   return StartupPermissionsResult(
-    locationGranted: locationOk,
+    locationGranted: false,
     vibrationReady: vib,
-    locationServiceEnabled: serviceOn,
+    locationServiceEnabled: true,
   );
 }
