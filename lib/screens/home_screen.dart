@@ -9,6 +9,7 @@ import '../screens/death_timer_screen.dart';
 import '../screens/larp_manager_integration_screen.dart';
 import '../screens/larp_manager_sync_settings_screen.dart';
 import '../screens/larp_picker_screen.dart';
+import '../screens/player_presence_settings_section.dart';
 import '../screens/rules_aids_screen.dart';
 import '../screens/rules_screen.dart';
 import '../models/death_rules.dart';
@@ -21,6 +22,8 @@ import '../services/game_context_service.dart';
 import '../services/game_membership_service.dart';
 import '../services/larp_manager_integration_status_service.dart';
 import '../services/larp_manager_registration_service.dart';
+import '../services/location_tracking_rules_repository.dart';
+import '../services/member_presence_repository.dart';
 import '../services/user_profile_service.dart';
 import '../utils/error_reporting.dart';
 import '../widgets/lm_integration_setup_prompt.dart';
@@ -594,6 +597,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 if (_hasCharacter || _gameRole.canConfigureDeathRules) ...[
                 const SizedBox(height: 32),
+                PlayerPresenceSettingsSection(
+                  presenceRepository: MemberPresenceRepository(),
+                  locationRulesRepository: LocationTrackingRulesRepository(),
+                ),
+                const SizedBox(height: 24),
                 Card(
                   child: InkWell(
                     onTap: () => Navigator.push(
