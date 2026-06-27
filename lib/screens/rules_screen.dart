@@ -1,21 +1,34 @@
 import 'package:flutter/material.dart';
 
 import '../models/death_rules.dart';
+import '../models/event_session.dart';
+import '../services/event_session_repository.dart';
 import '../services/rules_repository.dart';
+import '../utils/error_reporting.dart';
+import '../utils/relative_time.dart';
 
 /// Screen for configuring rules. Currently shows Death rules form.
 class RulesScreen extends StatefulWidget {
-  const RulesScreen({super.key});
+  const RulesScreen({
+    super.key,
+    this.eventSessionRepository,
+  });
+
+  final EventSessionRepository? eventSessionRepository;
 
   @override
   State<RulesScreen> createState() => _RulesScreenState();
 }
 
 class _RulesScreenState extends State<RulesScreen> {
+  late final EventSessionRepository _eventSessionRepo =
+      widget.eventSessionRepository ?? EventSessionRepository();
   final _repo = RulesRepository();
   DeathRules _rules = DeathRules.defaultRules;
+  EventSession _eventSession = EventSession.defaultSession;
   bool _loading = true;
   bool _saving = false;
+  bool _sessionBusy = false;
 
   @override
   void initState() {
@@ -25,9 +38,13 @@ class _RulesScreenState extends State<RulesScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final rules = await _repo.getDeathRules();
+    final deathRulesFuture = _repo.getDeathRules();
+    final eventSessionFuture = _eventSessionRepo.get();
+    final deathRules = await deathRulesFuture;
+    final eventSession = await eventSessionFuture;
     setState(() {
-      _rules = rules;
+      _rules = deathRules;
+      _eventSession = eventSession;
       _loading = false;
     });
   }
@@ -65,10 +82,124 @@ class _RulesScreenState extends State<RulesScreen> {
           : ListView(
               padding: const EdgeInsets.all(24),
               children: [
+                _buildEventSessionSection(),
+                const SizedBox(height: 32),
                 _buildDeathSection(),
               ],
             ),
     );
+  }
+
+  Widget _buildEventSessionSection() {
+    final session = _eventSession;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Event session', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        Text(
+          session.isLive ? 'Live' : 'Not live',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: session.isLive ? Colors.green : null,
+              ),
+        ),
+        if (session.liveStartedAt != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Started ${relativeTime(session.liveStartedAt!)}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+        if (session.liveEndedAt != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Ended ${relativeTime(session.liveEndedAt!)}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+        const SizedBox(height: 16),
+        if (_sessionBusy)
+          const Center(child: CircularProgressIndicator())
+        else if (session.isLive)
+          FilledButton.tonal(
+            onPressed: () => _confirmEndEvent(context),
+            child: const Text('End event'),
+          )
+        else
+          FilledButton(
+            onPressed: () => _confirmStartEvent(context),
+            child: const Text('Start event'),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _confirmStartEvent(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Start event?'),
+        content: const Text(
+          'Players with location opt-in will begin pinging while the event is live.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Start event'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _runSessionAction(_eventSessionRepo.startEvent);
+  }
+
+  Future<void> _confirmEndEvent(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('End event?'),
+        content: const Text(
+          'Location pinging will stop until the event is started again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('End event'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _runSessionAction(_eventSessionRepo.endEvent);
+  }
+
+  Future<void> _runSessionAction(Future<void> Function() action) async {
+    setState(() => _sessionBusy = true);
+    try {
+      await action();
+      final session = await _eventSessionRepo.get();
+      if (!mounted) return;
+      setState(() {
+        _eventSession = session;
+        _sessionBusy = false;
+      });
+    } catch (e, st) {
+      final report = reportAppError('RulesScreen.eventSession', e, st);
+      if (!mounted) return;
+      setState(() => _sessionBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(report.userMessage)),
+      );
+    }
   }
 
   Widget _buildDeathSection() {

@@ -35,6 +35,17 @@ service cloud.firestore {
             || gameMemberRole(instanceId, eventSlug) == 'superAdmin');
     }
 
+    function isStaffOrAbove(instanceId, eventSlug) {
+      let role = gameMemberRole(instanceId, eventSlug);
+      return role == 'owner' || role == 'superAdmin' || role == 'staff';
+    }
+
+    function playerPresenceFieldsOnly() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['locationOptIn', 'presenceState', 'presenceUpdatedAt'])
+        && request.resource.data.role == resource.data.role;
+    }
+
     function tenantKeyMatches(instanceId, eventSlug, key) {
       return key == instanceId + '::' + eventSlug;
     }
@@ -125,7 +136,7 @@ service cloud.firestore {
 
         match /members/{memberId} {
           allow read: if isAuthenticated() && request.auth.uid == memberId;
-          allow read: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+          allow read: if isAuthenticated() && isStaffOrAbove(instanceId, eventSlug);
           allow create: if isAuthenticated()
             && request.auth.uid == memberId
             && memberId == request.auth.uid
@@ -134,15 +145,18 @@ service cloud.firestore {
             && request.resource.data.eventSlug == eventSlug;
           allow update: if isAuthenticated()
             && request.auth.uid == memberId
-            && request.resource.data.role == 'player'
             && resource.data.role == 'player'
-            && request.resource.data.instanceId == instanceId
-            && request.resource.data.eventSlug == eventSlug;
+            && playerPresenceFieldsOnly();
           allow update: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
           allow delete: if false;
         }
 
         match /rules/{ruleId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+        }
+
+        match /eventSession/{docId} {
           allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
           allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
         }
