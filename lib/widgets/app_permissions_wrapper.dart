@@ -5,7 +5,7 @@ import '../screens/permissions_screen.dart';
 import '../utils/startup_permissions_utils.dart';
 
 /// Runs [requestStartupPermissions] at startup, then shows [AuthGate] or
-/// [PermissionsScreen] with Recheck until requirements pass.
+/// [PermissionsScreen] with Recheck until vibration/haptics requirements pass.
 class AppPermissionsWrapper extends StatefulWidget {
   const AppPermissionsWrapper({super.key});
 

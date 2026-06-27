@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../utils/location_utils.dart';
 import '../utils/startup_permissions_utils.dart';
 
 /// Shown when [StartupPermissionsResult.allGranted] is false after startup or recheck.
@@ -17,9 +16,7 @@ class PermissionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final locOk = result.locationGranted;
     final vibOk = result.vibrationReady;
-    final gpsOn = result.locationServiceEnabled;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Permissions')),
@@ -28,37 +25,10 @@ class PermissionsScreen extends StatelessWidget {
           padding: const EdgeInsets.all(24),
           children: [
             Text(
-              'RoleKeeper needs the following so in-game features can work correctly.',
+              'RoleKeeper needs vibration or haptics so in-game alerts can work correctly.',
               style: theme.textTheme.bodyLarge,
             ),
             const SizedBox(height: 24),
-            _StatusCard(
-              title: 'Location',
-              granted: locOk,
-              children: [
-                if (!gpsOn)
-                  Text(
-                    'Location services appear to be off. Turn on GPS/location for this device, then tap Recheck.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                if (gpsOn && !locOk)
-                  Text(
-                    'Location access was not granted. You can open system settings for RoleKeeper and allow location, then tap Recheck.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () => LocationUtils.openLocationAppSettings(),
-                  icon: const Icon(Icons.settings),
-                  label: const Text('Open location settings'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
             _StatusCard(
               title: 'Vibration & haptics',
               granted: vibOk,
