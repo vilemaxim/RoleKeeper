@@ -3,18 +3,24 @@ import 'package:flutter/material.dart';
 import '../models/death_rules.dart';
 import '../models/event_session.dart';
 import '../services/event_session_repository.dart';
+import '../services/location_tracking_rules_repository.dart';
 import '../services/rules_repository.dart';
 import '../utils/error_reporting.dart';
 import '../utils/relative_time.dart';
+import 'location_tracking_rules_section.dart';
 
-/// Screen for configuring rules. Currently shows Death rules form.
+/// Screen for configuring LARP rules (event session, location tracking, death).
 class RulesScreen extends StatefulWidget {
   const RulesScreen({
     super.key,
     this.eventSessionRepository,
+    this.locationTrackingRulesRepository,
+    this.rulesRepository,
   });
 
   final EventSessionRepository? eventSessionRepository;
+  final LocationTrackingRulesRepository? locationTrackingRulesRepository;
+  final RulesRepository? rulesRepository;
 
   @override
   State<RulesScreen> createState() => _RulesScreenState();
@@ -23,7 +29,10 @@ class RulesScreen extends StatefulWidget {
 class _RulesScreenState extends State<RulesScreen> {
   late final EventSessionRepository _eventSessionRepo =
       widget.eventSessionRepository ?? EventSessionRepository();
-  final _repo = RulesRepository();
+  late final LocationTrackingRulesRepository _locationRulesRepo =
+      widget.locationTrackingRulesRepository ?? LocationTrackingRulesRepository();
+  late final RulesRepository _repo =
+      widget.rulesRepository ?? RulesRepository();
   DeathRules _rules = DeathRules.defaultRules;
   EventSession _eventSession = EventSession.defaultSession;
   bool _loading = true;
@@ -83,6 +92,10 @@ class _RulesScreenState extends State<RulesScreen> {
               padding: const EdgeInsets.all(24),
               children: [
                 _buildEventSessionSection(),
+                const SizedBox(height: 32),
+                LocationTrackingRulesSection(
+                  locationRulesRepository: _locationRulesRepo,
+                ),
                 const SizedBox(height: 32),
                 _buildDeathSection(),
               ],
