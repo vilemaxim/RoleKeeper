@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../models/activity_event.dart';
 import '../models/game_tenant_ref.dart';
@@ -25,8 +26,26 @@ class LocationPingService {
   static const functionsRegion = 'us-central1';
   static const callableName = 'recordLocationPing';
 
+  /// Minimum movement (meters) before sending another ping.
+  static const movementThresholdMeters = 10.0;
+
+  /// Send a ping at least this often even when stationary (seconds).
+  static const heartbeatIntervalSeconds = 300;
+
+  /// New fix must improve accuracy by at least this much to re-ping in place.
+  static const accuracyImprovementMeters = 5.0;
+
   bool _running = false;
   Timer? _timer;
+
+  DateTime? _lastSentAt;
+  double? _lastSentLat;
+  double? _lastSentLng;
+  double? _lastSentAccuracy;
+  bool _forceNextPing = false;
+
+  LocationTrackingRules? _activeRules;
+  MemberPresence? _activePresence;
 
   bool get isRunning => _running;
 
@@ -55,6 +74,76 @@ class LocationPingService {
     return rules.enabled && eventLive && presence.locationOptIn;
   }
 
+  /// Whether a fix should be sent given last-sent state and movement/heartbeat rules.
+  @visibleForTesting
+  static bool shouldSendPing({
+    required double latitude,
+    required double longitude,
+    required double? accuracy,
+    required double? lastSentLat,
+    required double? lastSentLng,
+    required double? lastSentAccuracy,
+    required DateTime? lastSentAt,
+    required DateTime now,
+    required bool force,
+  }) {
+    if (force) return true;
+    if (lastSentAt == null || lastSentLat == null || lastSentLng == null) {
+      return true;
+    }
+
+    final elapsed = now.difference(lastSentAt);
+    if (elapsed >= const Duration(seconds: heartbeatIntervalSeconds)) {
+      return true;
+    }
+
+    final distance = Geolocator.distanceBetween(
+      lastSentLat,
+      lastSentLng,
+      latitude,
+      longitude,
+    );
+    if (distance >= movementThresholdMeters) return true;
+
+    if (accuracy != null &&
+        lastSentAccuracy != null &&
+        lastSentAccuracy - accuracy >= accuracyImprovementMeters) {
+      return true;
+    }
+
+    return false;
+  }
+
+  static bool _presenceChanged(MemberPresence? prior, MemberPresence next) {
+    return prior != null &&
+        (prior.presenceState != next.presenceState ||
+            prior.locationOptIn != next.locationOptIn);
+  }
+
+  static bool _rulesChanged(
+    LocationTrackingRules? prior,
+    LocationTrackingRules next,
+  ) {
+    return prior != null &&
+        (prior.enabled != next.enabled ||
+            prior.pingIntervalSeconds != next.pingIntervalSeconds);
+  }
+
+  void _clearLastSentState() {
+    _lastSentAt = null;
+    _lastSentLat = null;
+    _lastSentLng = null;
+    _lastSentAccuracy = null;
+    _forceNextPing = false;
+  }
+
+  void _recordSent(ActivityEventLocation location) {
+    _lastSentAt = DateTime.now();
+    _lastSentLat = location.latitude;
+    _lastSentLng = location.longitude;
+    _lastSentAccuracy = location.accuracy;
+  }
+
   /// Starts the foreground ping timer when [shouldRun] is true.
   Future<void> start({
     required LocationTrackingRules rules,
@@ -78,6 +167,9 @@ class LocationPingService {
     }
 
     _running = true;
+    _activeRules = rules;
+    _activePresence = presence;
+    _forceNextPing = true;
     unawaited(_sendPing());
     _timer?.cancel();
     _timer = Timer.periodic(
@@ -91,6 +183,9 @@ class LocationPingService {
     _timer?.cancel();
     _timer = null;
     _running = false;
+    _activeRules = null;
+    _activePresence = null;
+    _clearLastSentState();
   }
 
   /// Re-evaluates conditions; starts or stops the timer accordingly.
@@ -99,19 +194,35 @@ class LocationPingService {
     required bool eventLive,
     required MemberPresence presence,
   }) async {
-    if (shouldRun(
+    if (!shouldRun(
       rules: rules,
       eventLive: eventLive,
       presence: presence,
     )) {
-      await start(
-        rules: rules,
-        eventLive: eventLive,
-        presence: presence,
-      );
-    } else {
       stop();
+      return;
     }
+
+    final presenceChanged =
+        _running && _presenceChanged(_activePresence, presence);
+    final rulesChanged = _running && _rulesChanged(_activeRules, rules);
+
+    _activeRules = rules;
+    _activePresence = presence;
+
+    if (_running) {
+      if (presenceChanged || rulesChanged) {
+        _forceNextPing = true;
+        unawaited(_sendPing());
+      }
+      return;
+    }
+
+    await start(
+      rules: rules,
+      eventLive: eventLive,
+      presence: presence,
+    );
   }
 
   void dispose() => stop();
@@ -132,20 +243,37 @@ class LocationPingService {
         source: 'gps',
       );
 
+      final force = _forceNextPing;
+      _forceNextPing = false;
+      if (!shouldSendPing(
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        lastSentLat: _lastSentLat,
+        lastSentLng: _lastSentLng,
+        lastSentAccuracy: _lastSentAccuracy,
+        lastSentAt: _lastSentAt,
+        now: DateTime.now(),
+        force: force,
+      )) {
+        return;
+      }
+
       final tenant = _resolvedTenant;
       final debug = debugSendPing;
       if (debug != null) {
         await debug(tenant: tenant, location: location);
-        return;
+      } else {
+        final callable = _resolvedFunctions.httpsCallable(callableName);
+        await callable.call({
+          'gameId': tenant.tenantKey,
+          'instanceId': tenant.instanceId,
+          'eventSlug': tenant.eventSlug,
+          'location': location.toMap(),
+        });
       }
 
-      final callable = _resolvedFunctions.httpsCallable(callableName);
-      await callable.call({
-        'gameId': tenant.tenantKey,
-        'instanceId': tenant.instanceId,
-        'eventSlug': tenant.eventSlug,
-        'location': location.toMap(),
-      });
+      _recordSent(location);
     } catch (e, st) {
       debugPrint('LocationPingService._sendPing: $e\n$st');
     }
