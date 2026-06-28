@@ -105,6 +105,16 @@ The job **`larpManagerSyncScheduled`** runs **every 15 minutes** and **queries e
 
 **Manual “Sync now”** (same screen) calls **`runLarpManagerSyncCallable`** and does **not** require scheduled sync to be on.
 
+### Home Assistant location reads
+
+Staff+ can enable a per-event **Home Assistant** integration under **Home → Home Assistant**. It exposes **`getLatestPlayerLocations`** (API key auth, no Firebase sign-in). See [docs/HOME_ASSISTANT_INTEGRATION.md](docs/HOME_ASSISTANT_INTEGRATION.md).
+
+Deploy with:
+
+```bash
+firebase deploy --only functions:getLatestPlayerLocations,functions:configureHomeAssistantIntegration
+```
+
 ### 3. Deploy functions
 
 ```bash

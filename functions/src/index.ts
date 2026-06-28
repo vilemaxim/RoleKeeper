@@ -32,6 +32,14 @@ import {
   runRecordLocationPing,
   type RecordLocationPingBody,
 } from "./location/recordLocationPing";
+import {
+  runGetLatestPlayerLocations,
+  type GetLatestPlayerLocationsBody,
+} from "./integrations/getLatestPlayerLocations";
+import {
+  runConfigureHomeAssistantIntegration,
+  type ConfigureHomeAssistantBody,
+} from "./integrations/configureHomeAssistantIntegration";
 
 admin.initializeApp();
 
@@ -734,5 +742,25 @@ export const recordLocationPing = onCall(
     runRecordLocationPing(
       { db: admin.firestore() },
       request as CallableRequest<RecordLocationPingBody>
+    )
+);
+
+/** Returns latest player positions for Home Assistant (API key auth). */
+export const getLatestPlayerLocations = onCall(
+  { region: REGION },
+  async (request) =>
+    runGetLatestPlayerLocations(
+      { db: admin.firestore() },
+      request as CallableRequest<GetLatestPlayerLocationsBody>
+    )
+);
+
+/** Staff+ configuration for Home Assistant integration (API key generation). */
+export const configureHomeAssistantIntegration = onCall(
+  { region: REGION },
+  async (request) =>
+    runConfigureHomeAssistantIntegration(
+      { db: admin.firestore() },
+      request as CallableRequest<ConfigureHomeAssistantBody>
     )
 );

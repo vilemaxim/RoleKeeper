@@ -101,6 +101,12 @@ abstract final class GameFirestorePaths {
   ) =>
       eventDoc(db, tenant).collection('larpManagerMirrorMeta').doc('summary');
 
+  static DocumentReference<Map<String, dynamic>> homeAssistantIntegrationConfig(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+  ) =>
+      eventDoc(db, tenant).collection('integrations').doc('homeAssistant');
+
   static CollectionReference<Map<String, dynamic>> larpManagerMirrorChars(
     FirebaseFirestore db,
     GameTenantRef tenant,
