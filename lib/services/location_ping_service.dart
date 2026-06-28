@@ -46,17 +46,13 @@ class LocationPingService {
     return t;
   }
 
-  /// Whether all client-side conditions allow pinging.
+  /// Whether client-side conditions allow attempting pinging (excludes permission).
   static bool shouldRun({
     required LocationTrackingRules rules,
     required bool eventLive,
     required MemberPresence presence,
-    required bool locationPermissionGranted,
   }) {
-    return rules.enabled &&
-        eventLive &&
-        presence.locationOptIn &&
-        locationPermissionGranted;
+    return rules.enabled && eventLive && presence.locationOptIn;
   }
 
   /// Starts the foreground ping timer when [shouldRun] is true.
@@ -64,13 +60,11 @@ class LocationPingService {
     required LocationTrackingRules rules,
     required bool eventLive,
     required MemberPresence presence,
-    required bool locationPermissionGranted,
   }) async {
     if (!shouldRun(
       rules: rules,
       eventLive: eventLive,
       presence: presence,
-      locationPermissionGranted: locationPermissionGranted,
     )) {
       stop();
       return;
@@ -104,19 +98,16 @@ class LocationPingService {
     required LocationTrackingRules rules,
     required bool eventLive,
     required MemberPresence presence,
-    required bool locationPermissionGranted,
   }) async {
     if (shouldRun(
       rules: rules,
       eventLive: eventLive,
       presence: presence,
-      locationPermissionGranted: locationPermissionGranted,
     )) {
       await start(
         rules: rules,
         eventLive: eventLive,
         presence: presence,
-        locationPermissionGranted: locationPermissionGranted,
       );
     } else {
       stop();

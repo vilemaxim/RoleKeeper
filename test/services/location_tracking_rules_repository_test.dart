@@ -128,5 +128,30 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test('watch emits updates when rules document changes', () async {
+      final firestore = FakeFirebaseFirestore();
+      await seedGameTenantDocs(firestore, kTestGameTenant);
+
+      final repo = LocationTrackingRulesRepository(
+        firestore: firestore,
+        tenant: kTestGameTenant,
+      );
+
+      final values = <LocationTrackingRules>[];
+      final sub = repo.watch().listen(values.add);
+
+      await Future<void>.delayed(Duration.zero);
+      expect(values, isNotEmpty);
+      expect(values.last.enabled, isFalse);
+
+      await repo.save(sampleRules);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(values.last.enabled, isTrue);
+      expect(values.last.pingIntervalSeconds, 90);
+
+      await sub.cancel();
+    });
   });
 }

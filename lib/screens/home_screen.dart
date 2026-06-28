@@ -16,7 +16,9 @@ import '../screens/player_presence_settings_section.dart';
 import '../screens/rules_aids_screen.dart';
 import '../screens/rules_screen.dart';
 import '../models/death_rules.dart';
+import '../models/event_session.dart';
 import '../models/game_role.dart';
+import '../models/member_presence.dart';
 import '../services/auth_service.dart';
 import '../services/activity_events_service.dart';
 import '../services/character_status_service.dart';
@@ -31,8 +33,8 @@ import '../services/location_tracking_rules_repository.dart';
 import '../services/member_presence_repository.dart';
 import '../services/user_profile_service.dart';
 import '../utils/error_reporting.dart';
-import '../utils/location_utils.dart';
 import '../widgets/lm_integration_setup_prompt.dart';
+import '../widgets/location_opt_in_prompt.dart';
 
 /// Main home screen shown after sign-in.
 class HomeScreen extends StatefulWidget {
@@ -58,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _eventSessionRepo = EventSessionRepository();
   final _presenceRepo = MemberPresenceRepository();
   StreamSubscription? _eventSessionSub;
+  StreamSubscription? _locationRulesSub;
   GameRole _gameRole = GameRole.player;
   LmIntegrationEvaluation? _lmEvaluation;
   bool _bootstrapDone = false;
@@ -68,11 +71,29 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _registrationMessage;
   String? _characterMessage;
   bool _checkingRegistration = false;
+  bool _trackingEnabled = false;
+  bool _eventLive = false;
+  MemberPresence _presence = MemberPresence.defaultPresence;
+  bool _locationOptInPromptDismissed = false;
+  EventSession _lastEventSession = EventSession.defaultSession;
 
   @override
   void initState() {
     super.initState();
-    _eventSessionSub = _eventSessionRepo.watch().listen((_) {
+    _eventSessionSub = _eventSessionRepo.watch().listen((session) {
+      if (!_lastEventSession.isLive && session.isLive) {
+        _locationOptInPromptDismissed = false;
+      }
+      _lastEventSession = session;
+      if (mounted) {
+        setState(() => _eventLive = session.isLive);
+      }
+      unawaited(_syncLocationPings());
+    });
+    _locationRulesSub = _locationRulesRepo.watch().listen((rules) {
+      if (mounted) {
+        setState(() => _trackingEnabled = rules.enabled);
+      }
       unawaited(_syncLocationPings());
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
@@ -81,6 +102,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _eventSessionSub?.cancel();
+    _locationRulesSub?.cancel();
     _locationPingService.dispose();
     super.dispose();
   }
@@ -90,17 +112,28 @@ class _HomeScreenState extends State<HomeScreen> {
       final rules = await _locationRulesRepo.get();
       final session = await _eventSessionRepo.get();
       final presence = await _presenceRepo.getPresence();
-      final granted = await LocationUtils.isWhenInUseGranted();
+      if (mounted) {
+        setState(() {
+          _trackingEnabled = rules.enabled;
+          _eventLive = session.isLive;
+          _presence = presence;
+        });
+      }
       await _locationPingService.syncConditions(
         rules: rules,
         eventLive: session.isLive,
         presence: presence,
-        locationPermissionGranted: granted,
       );
     } catch (e, st) {
       debugPrint('HomeScreen._syncLocationPings: $e\n$st');
     }
   }
+
+  bool get _showLocationOptInPrompt =>
+      _trackingEnabled &&
+      _eventLive &&
+      !_presence.locationOptIn &&
+      !_locationOptInPromptDismissed;
 
   Future<void> _bootstrap() async {
     await _membershipService.ensureMembershipForCurrentGame();
@@ -653,6 +686,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 if (_hasCharacter || _gameRole.canConfigureDeathRules) ...[
                 const SizedBox(height: 32),
+                if (_showLocationOptInPrompt) ...[
+                  LocationOptInPrompt(
+                    presenceRepository: _presenceRepo,
+                    visible: true,
+                    onOptInEnabled: () => unawaited(_syncLocationPings()),
+                    onDismiss: () {
+                      setState(() => _locationOptInPromptDismissed = true);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 PlayerPresenceSettingsSection(
                   presenceRepository: _presenceRepo,
                   locationRulesRepository: _locationRulesRepo,

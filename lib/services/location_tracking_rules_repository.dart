@@ -31,6 +31,12 @@ class LocationTrackingRulesRepository {
     return LocationTrackingRules.fromMap(doc.data());
   }
 
+  Stream<LocationTrackingRules> watch() {
+    return _rulesRef
+        .snapshots()
+        .map((doc) => LocationTrackingRules.fromMap(doc.data()));
+  }
+
   Future<void> save(LocationTrackingRules rules) async {
     await _rulesRef.set(rules.toMap());
   }
