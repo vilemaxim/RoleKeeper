@@ -6,6 +6,11 @@
  *   - OOG players included when they have recent pings
  *   - Invalid key, disabled integration, and missing tenant all return permission-denied
  *   - Empty result when no recent pings
+ *
+ * Task 007 additions (ADR 002 hot path):
+ *   - Reads opted-in members only; does not query locationPings
+ *   - Uses members/{uid}.lastLocation with RECENT_PING_WINDOW_MS filter
+ *   - Omits members without lastLocation or with stale lastLocation
  */
 
 import { test } from "node:test";
@@ -43,8 +48,8 @@ function memberPath(uid: string): string {
   return `${BASE}/members/${uid}`;
 }
 
-function pingPath(id: string): string {
-  return `${BASE}/locationPings/${id}`;
+function pingCollectionPath(): string {
+  return `${BASE}/locationPings`;
 }
 
 function callableRequest(
@@ -75,65 +80,57 @@ function seedIntegration(
   });
 }
 
-function seedMember(
+function seedMemberWithLastLocation(
   stub: ReturnType<typeof makeFirestoreStub>,
   uid: string,
-  opts: { locationOptIn?: boolean; presenceState?: string } = {}
-) {
-  const { locationOptIn = true, presenceState = "in_game" } = opts;
-  stub.store.set(memberPath(uid), {
-    role: "player",
-    locationOptIn,
-    presenceState,
-  });
-}
-
-function seedPing(
-  stub: ReturnType<typeof makeFirestoreStub>,
-  id: string,
-  playerId: string,
   opts: {
-    at?: Date;
+    locationOptIn?: boolean;
     presenceState?: string;
+    at?: Date;
     latitude?: number;
     longitude?: number;
     accuracy?: number;
+    includeLastLocation?: boolean;
   } = {}
 ) {
   const {
-    at = RECENT,
+    locationOptIn = true,
     presenceState = "in_game",
+    at = RECENT,
     latitude = 51.5,
     longitude = -0.12,
     accuracy = 10,
+    includeLastLocation = true,
   } = opts;
   const inGame = presenceState === "in_game";
-  stub.store.set(pingPath(id), {
-    playerId,
+  const data: Record<string, unknown> = {
+    role: "player",
+    locationOptIn,
     presenceState,
-    inGame,
-    timestamp: ts(at),
-    location: { latitude, longitude, accuracy, source: "gps" },
-  });
+  };
+  if (includeLastLocation) {
+    data.lastLocation = {
+      latitude,
+      longitude,
+      accuracy,
+      source: "gps",
+      timestamp: ts(at),
+      presenceState,
+      inGame,
+    };
+  }
+  stub.store.set(memberPath(uid), data);
 }
 
-test("returns latest positions for opted-in players with recent pings", async () => {
+test("returns latest positions for opted-in members with recent lastLocation", async () => {
   const stub = makeFirestoreStub();
   seedIntegration(stub);
-  seedMember(stub, "player-a");
-  seedMember(stub, "player-b", { locationOptIn: false });
-  seedPing(stub, "ping-a-old", "player-a", {
-    at: new Date("2026-06-27T13:45:00.000Z"),
-    latitude: 51.1,
-    longitude: -0.11,
-  });
-  seedPing(stub, "ping-a-new", "player-a", {
-    at: RECENT,
+  seedMemberWithLastLocation(stub, "player-a", {
     latitude: 51.5074,
     longitude: -0.1278,
     accuracy: 8,
   });
-  seedPing(stub, "ping-b", "player-b", { at: RECENT });
+  seedMemberWithLastLocation(stub, "player-b", { locationOptIn: false });
 
   const result = await runGetLatestPlayerLocations(
     depsForStub(stub),
@@ -151,12 +148,10 @@ test("returns latest positions for opted-in players with recent pings", async ()
   assert.ok(row.timestamp);
 });
 
-test("includes out_of_game players with recent pings", async () => {
+test("includes out_of_game members with recent lastLocation", async () => {
   const stub = makeFirestoreStub();
   seedIntegration(stub);
-  seedMember(stub, "player-oog", { presenceState: "out_of_game" });
-  seedPing(stub, "ping-oog", "player-oog", {
-    at: RECENT,
+  seedMemberWithLastLocation(stub, "player-oog", {
     presenceState: "out_of_game",
   });
 
@@ -170,11 +165,10 @@ test("includes out_of_game players with recent pings", async () => {
   assert.equal(result.players[0].inGame, false);
 });
 
-test("returns empty array when no opted-in players have recent pings", async () => {
+test("returns empty array when opted-in members have stale lastLocation", async () => {
   const stub = makeFirestoreStub();
   seedIntegration(stub);
-  seedMember(stub, "player-a");
-  seedPing(stub, "ping-stale", "player-a", { at: STALE });
+  seedMemberWithLastLocation(stub, "player-a", { at: STALE });
 
   const result = await runGetLatestPlayerLocations(
     depsForStub(stub),
@@ -182,6 +176,39 @@ test("returns empty array when no opted-in players have recent pings", async () 
   );
 
   assert.deepEqual(result.players, []);
+});
+
+test("omits opted-in members without lastLocation", async () => {
+  const stub = makeFirestoreStub();
+  seedIntegration(stub);
+  seedMemberWithLastLocation(stub, "player-a", { includeLastLocation: false });
+
+  const result = await runGetLatestPlayerLocations(
+    depsForStub(stub),
+    callableRequest({ gameId: "g1::crucible", apiKey: API_KEY })
+  );
+
+  assert.deepEqual(result.players, []);
+});
+
+test("does not query locationPings collection", async () => {
+  const stub = makeFirestoreStub([], {
+    failOnGet: (path, kind) => {
+      if (kind === "collection" && path === pingCollectionPath()) {
+        return new Error("locationPings must not be queried on hot path");
+      }
+      return null;
+    },
+  });
+  seedIntegration(stub);
+  seedMemberWithLastLocation(stub, "player-a");
+
+  const result = await runGetLatestPlayerLocations(
+    depsForStub(stub),
+    callableRequest({ gameId: "g1::crucible", apiKey: API_KEY })
+  );
+
+  assert.equal(result.players.length, 1);
 });
 
 test("rejects invalid API key without leaking tenant existence", async () => {
@@ -205,8 +232,7 @@ test("rejects invalid API key without leaking tenant existence", async () => {
 test("rejects when integration is disabled", async () => {
   const stub = makeFirestoreStub();
   seedIntegration(stub, { enabled: false });
-  seedMember(stub, "player-a");
-  seedPing(stub, "ping-a", "player-a", { at: RECENT });
+  seedMemberWithLastLocation(stub, "player-a");
 
   await assert.rejects(
     () =>

@@ -62,60 +62,45 @@ export async function runGetLatestPlayerLocations(
 
   const now = deps.now?.() ?? admin.firestore.Timestamp.now();
   const cutoffMs = now.toDate().getTime() - RECENT_PING_WINDOW_MS;
-  const cutoff = admin.firestore.Timestamp.fromMillis(cutoffMs);
 
   const membersSnap = await deps.db
     .collection(`${base}/members`)
     .where("locationOptIn", "==", true)
     .get();
-  const optedIn = new Set(membersSnap.docs.map((d) => d.id));
-
-  const pingsSnap = await deps.db
-    .collection(`${base}/locationPings`)
-    .where("timestamp", ">=", cutoff)
-    .get();
-
-  const latestByPlayer = new Map<string, Record<string, unknown>>();
-  for (const doc of pingsSnap.docs) {
-    const data = doc.data();
-    const playerId = data.playerId;
-    if (typeof playerId !== "string" || !optedIn.has(playerId)) continue;
-
-    const ts = data.timestamp as admin.firestore.Timestamp | undefined;
-    if (!ts?.toDate) continue;
-
-    const existing = latestByPlayer.get(playerId);
-    if (!existing) {
-      latestByPlayer.set(playerId, data);
-      continue;
-    }
-    const existingTs = existing.timestamp as admin.firestore.Timestamp;
-    if (ts.toDate().getTime() > existingTs.toDate().getTime()) {
-      latestByPlayer.set(playerId, data);
-    }
-  }
 
   const players: PlayerLocationRow[] = [];
-  for (const [playerId, data] of latestByPlayer) {
+  for (const doc of membersSnap.docs) {
     if (players.length >= MAX_PLAYER_LOCATIONS) break;
 
-    const loc = data.location as Record<string, unknown> | undefined;
-    const lat = loc?.latitude;
-    const lng = loc?.longitude;
+    const data = doc.data();
+    const lastLocation = data.lastLocation as Record<string, unknown> | undefined;
+    if (!lastLocation) continue;
+
+    const ts = lastLocation.timestamp as admin.firestore.Timestamp | undefined;
+    if (!ts?.toDate || ts.toDate().getTime() < cutoffMs) continue;
+
+    const lat = lastLocation.latitude;
+    const lng = lastLocation.longitude;
     if (typeof lat !== "number" || typeof lng !== "number") continue;
 
     const presenceState =
-      typeof data.presenceState === "string" ? data.presenceState : "in_game";
+      typeof lastLocation.presenceState === "string"
+        ? lastLocation.presenceState
+        : "in_game";
+    const inGame =
+      typeof lastLocation.inGame === "boolean"
+        ? lastLocation.inGame
+        : presenceState === "in_game";
 
     const row: PlayerLocationRow = {
-      playerId,
+      playerId: doc.id,
       latitude: lat,
       longitude: lng,
-      timestamp: data.timestamp as admin.firestore.Timestamp,
+      timestamp: ts,
       presenceState,
-      inGame: presenceState === "in_game",
+      inGame,
     };
-    const accuracy = loc?.accuracy;
+    const accuracy = lastLocation.accuracy;
     if (typeof accuracy === "number") row.accuracy = accuracy;
     players.push(row);
   }
