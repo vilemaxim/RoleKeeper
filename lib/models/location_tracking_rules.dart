@@ -8,6 +8,16 @@ class LocationTrackingRules {
   final bool enabled;
   final int pingIntervalSeconds;
 
+  LocationTrackingRules copyWith({
+    bool? enabled,
+    int? pingIntervalSeconds,
+  }) {
+    return LocationTrackingRules(
+      enabled: enabled ?? this.enabled,
+      pingIntervalSeconds: pingIntervalSeconds ?? this.pingIntervalSeconds,
+    );
+  }
+
   Map<String, dynamic> toMap() => {
         'enabled': enabled,
         'pingIntervalSeconds': pingIntervalSeconds,
