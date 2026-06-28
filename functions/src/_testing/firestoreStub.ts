@@ -62,6 +62,16 @@ export interface FirestoreStubOptions {
   failOnGet?: (path: string, kind: "doc" | "collection") => Error | null;
 }
 
+function stubComparable(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "object" && value !== null && "toDate" in value) {
+    const d = (value as { toDate: () => Date }).toDate();
+    return d instanceof Date ? d.getTime() : null;
+  }
+  return null;
+}
+
 interface StubCollectionRef {
   doc: (id: string) => StubDocRef;
   where: (field: string, op: string, val: unknown) => StubQuery;
@@ -131,10 +141,21 @@ export function makeFirestoreStub(
       if (tail.includes("/")) continue;
       let ok = true;
       for (const [field, op, val] of filters) {
-        if (op !== "==") throw new Error(`stub only supports '==' (got ${op})`);
-        if ((v as Record<string, unknown>)[field] !== val) {
-          ok = false;
-          break;
+        const fieldVal = (v as Record<string, unknown>)[field];
+        if (op === "==") {
+          if (fieldVal !== val) {
+            ok = false;
+            break;
+          }
+        } else if (op === ">=") {
+          const left = stubComparable(fieldVal);
+          const right = stubComparable(val);
+          if (left === null || right === null || left < right) {
+            ok = false;
+            break;
+          }
+        } else {
+          throw new Error(`stub only supports '==' and '>=' (got ${op})`);
         }
       }
       if (!ok) continue;

@@ -18,6 +18,12 @@ extension GameRoleX on GameRole {
   /// Death rules UI: only owner and superAdmin configure [RulesScreen].
   bool get canConfigureDeathRules =>
       this == GameRole.owner || this == GameRole.superAdmin;
+
+  /// Home Assistant and other staff-facing integrations.
+  bool get canConfigureStaffIntegrations =>
+      this == GameRole.owner ||
+      this == GameRole.superAdmin ||
+      this == GameRole.staff;
 }
 
 GameRole gameRoleFromWire(String? raw) {

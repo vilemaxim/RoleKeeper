@@ -8,6 +8,7 @@ import '../models/larp_manager_event_link.dart';
 import '../models/larp_manager_registration_check_result.dart';
 import '../screens/characters_screen.dart';
 import '../screens/death_timer_screen.dart';
+import '../screens/home_assistant_integration_screen.dart';
 import '../screens/larp_manager_integration_screen.dart';
 import '../screens/larp_manager_sync_settings_screen.dart';
 import '../screens/larp_picker_screen.dart';
@@ -630,6 +631,23 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       icon: const Icon(Icons.cloud_sync_outlined),
                       label: const Text('LarpManager sync'),
+                    ),
+                  ),
+                ],
+                if (_gameRole.canConfigureStaffIntegrations) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const HomeAssistantIntegrationScreen(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.home_outlined),
+                      label: const Text('Home Assistant'),
                     ),
                   ),
                 ],

@@ -172,6 +172,11 @@ service cloud.firestore {
           allow update, delete: if false;
         }
 
+        match /integrations/{integrationId} {
+          allow read: if isAuthenticated() && isStaffOrAbove(instanceId, eventSlug);
+          allow write: if false;
+        }
+
         match /characters/{characterId} {
           allow create: if isAuthenticated()
             && isGameMember(instanceId, eventSlug)
