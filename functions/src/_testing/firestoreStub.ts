@@ -63,7 +63,7 @@ export interface FirestoreStubOptions {
 }
 
 function stubComparable(value: unknown): number | null {
-  if (value == null) return null;
+  if (value === null || value === undefined) return null;
   if (typeof value === "number") return value;
   if (typeof value === "object" && value !== null && "toDate" in value) {
     const d = (value as { toDate: () => Date }).toDate();
