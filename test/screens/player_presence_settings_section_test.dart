@@ -211,5 +211,37 @@ void main() {
 
       expect(presenceRepo.lastPresenceState, PresenceState.outOfGame);
     });
+
+    testWidgets('shows section when rules flip to enabled without remount',
+        (tester) async {
+      await seedLocationRules(enabled: false);
+
+      final rulesRepo = LocationTrackingRulesRepository(
+        firestore: firestore,
+        tenant: kTestGameTenant,
+      );
+      final presenceRepo = _RecordingMemberPresenceRepository(
+        firestore: firestore,
+        auth: MockFirebaseAuth(signedIn: true, mockUser: user),
+        tenant: kTestGameTenant,
+        initial: MemberPresence.defaultPresence,
+      );
+
+      await tester.pumpWidget(
+        wrap(presenceRepo: presenceRepo, rulesRepo: rulesRepo),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Location sharing'), findsNothing);
+
+      await rulesRepo.save(const LocationTrackingRules(
+        enabled: true,
+        pingIntervalSeconds: 60,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Location sharing'), findsOneWidget);
+      expect(find.text('In game'), findsOneWidget);
+    });
   });
 }

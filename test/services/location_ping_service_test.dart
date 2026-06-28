@@ -49,7 +49,6 @@ void main() {
           rules: _enabledRules(),
           eventLive: true,
           presence: _presence(),
-          locationPermissionGranted: true,
         ),
         isTrue,
       );
@@ -61,7 +60,6 @@ void main() {
           rules: _enabledRules(),
           eventLive: true,
           presence: _presence(state: PresenceState.outOfGame),
-          locationPermissionGranted: true,
         ),
         isTrue,
       );
@@ -73,7 +71,6 @@ void main() {
           rules: _disabledRules,
           eventLive: true,
           presence: _presence(),
-          locationPermissionGranted: true,
         ),
         isFalse,
       );
@@ -85,7 +82,6 @@ void main() {
           rules: _enabledRules(),
           eventLive: false,
           presence: _presence(),
-          locationPermissionGranted: true,
         ),
         isFalse,
       );
@@ -97,21 +93,19 @@ void main() {
           rules: _enabledRules(),
           eventLive: true,
           presence: _presence(optedIn: false),
-          locationPermissionGranted: true,
         ),
         isFalse,
       );
     });
 
-    test('false when location permission not granted', () {
+    test('true when opted in even if browser permission not yet granted', () {
       expect(
         LocationPingService.shouldRun(
           rules: _enabledRules(),
           eventLive: true,
           presence: _presence(),
-          locationPermissionGranted: false,
         ),
-        isFalse,
+        isTrue,
       );
     });
   });
@@ -128,7 +122,6 @@ void main() {
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       expect(service.isRunning, isTrue);
@@ -139,7 +132,6 @@ void main() {
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       service.stop();
@@ -152,14 +144,12 @@ void main() {
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       await service.syncConditions(
         rules: _enabledRules(interval: 1),
         eventLive: false,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       expect(service.isRunning, isFalse);
@@ -170,14 +160,12 @@ void main() {
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       await service.syncConditions(
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(state: PresenceState.outOfGame),
-        locationPermissionGranted: true,
       );
 
       expect(service.isRunning, isTrue);
@@ -188,14 +176,12 @@ void main() {
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       await service.syncConditions(
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(optedIn: false),
-        locationPermissionGranted: true,
       );
 
       expect(service.isRunning, isFalse);
@@ -206,12 +192,60 @@ void main() {
         rules: _enabledRules(interval: 1),
         eventLive: true,
         presence: _presence(),
-        locationPermissionGranted: true,
       );
 
       service.dispose();
 
       expect(service.isRunning, isFalse);
+    });
+
+    test('start prompts for permission when opted in but permission not yet granted',
+        () async {
+      var prompted = false;
+      LocationUtils.debugIsWeb = true;
+      LocationUtils.debugWebIsWhenInUseGranted = () async => false;
+      LocationUtils.debugWebRequestWhenInUse = () async {
+        prompted = true;
+        return true;
+      };
+
+      await service.start(
+        rules: _enabledRules(interval: 1),
+        eventLive: true,
+        presence: _presence(),
+      );
+
+      expect(prompted, isTrue);
+      expect(service.isRunning, isTrue);
+    });
+
+    test('start does not run timer when user denies permission prompt', () async {
+      LocationUtils.debugIsWeb = true;
+      LocationUtils.debugWebIsWhenInUseGranted = () async => false;
+      LocationUtils.debugWebRequestWhenInUse = () async => false;
+
+      await service.start(
+        rules: _enabledRules(interval: 1),
+        eventLive: true,
+        presence: _presence(),
+      );
+
+      expect(service.isRunning, isFalse);
+    });
+
+    test('syncConditions prompts and starts when opted in without prior permission',
+        () async {
+      LocationUtils.debugIsWeb = true;
+      LocationUtils.debugWebIsWhenInUseGranted = () async => false;
+      LocationUtils.debugWebRequestWhenInUse = () async => true;
+
+      await service.syncConditions(
+        rules: _enabledRules(interval: 1),
+        eventLive: true,
+        presence: _presence(),
+      );
+
+      expect(service.isRunning, isTrue);
     });
   });
 }

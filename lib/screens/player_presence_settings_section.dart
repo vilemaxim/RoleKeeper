@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/member_presence.dart';
+import '../models/location_tracking_rules.dart';
 import '../services/location_tracking_rules_repository.dart';
 import '../services/member_presence_repository.dart';
 import '../utils/error_reporting.dart';
@@ -31,21 +34,30 @@ class _PlayerPresenceSettingsSectionState
   bool _loading = true;
   bool _trackingEnabled = false;
   MemberPresence _presence = MemberPresence.defaultPresence;
+  StreamSubscription<LocationTrackingRules>? _rulesSub;
 
   @override
   void initState() {
     super.initState();
+    _rulesSub = widget.locationRulesRepository.watch().listen((rules) {
+      if (!mounted) return;
+      setState(() => _trackingEnabled = rules.enabled);
+    });
     _load();
+  }
+
+  @override
+  void dispose() {
+    _rulesSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final rules = await widget.locationRulesRepository.get();
       final presence = await widget.presenceRepository.getPresence();
       if (!mounted) return;
       setState(() {
-        _trackingEnabled = rules.enabled;
         _presence = presence;
         _loading = false;
       });
