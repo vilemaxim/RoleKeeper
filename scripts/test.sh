@@ -11,9 +11,45 @@ shopt -s globstar nullglob
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EMULATOR_PID=""
+STARTED_EMULATORS=0
+
+port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnH 2>/dev/null | grep -qE "[:.]${port}\b"
+    return $?
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
+emulator_ui_ready() {
+  curl -s http://localhost:4000 >/dev/null 2>&1
+}
+
+emulator_ports_blocked() {
+  local port
+  for port in 8080 9099 5001 9199 4000; do
+    if port_in_use "$port"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+cleanup_stale_emulators() {
+  echo "    Stale emulator ports detected — stopping orphaned Firebase processes..."
+  pkill -f "cloud-firestore-emulator" 2>/dev/null || true
+  pkill -f "firebase emulators:start" 2>/dev/null || true
+  pkill -f "firebase-tools.*emulators" 2>/dev/null || true
+  sleep 2
+}
 
 cleanup() {
-  if [ -n "$EMULATOR_PID" ]; then
+  if [ "$STARTED_EMULATORS" -eq 1 ] && [ -n "$EMULATOR_PID" ]; then
     echo ""
     echo ">>> Stopping Firebase emulators (PID $EMULATOR_PID)..."
     kill "$EMULATOR_PID" 2>/dev/null || true
@@ -28,24 +64,51 @@ echo "================================================"
 
 # --- Start Firebase emulators ---
 echo ""
-echo ">>> Starting Firebase emulators..."
-cd "$ROOT_DIR"
-firebase emulators:start \
-  --only auth,functions,firestore,storage \
-  --export-on-exit /tmp/rolekeeper-emulator-data \
-  --import /tmp/rolekeeper-emulator-data \
-  2>&1 | grep -E "(Emulator|Error|✔|✗|Started)" &
-EMULATOR_PID=$!
-
-# Wait for emulators to be ready
-echo "    Waiting for emulators..."
-for i in {1..30}; do
-  if curl -s http://localhost:4000 > /dev/null 2>&1; then
-    echo "    Emulators ready."
-    break
+if emulator_ui_ready; then
+  echo ">>> Firebase emulators already running — reusing."
+else
+  if emulator_ports_blocked; then
+    cleanup_stale_emulators
+    if emulator_ports_blocked; then
+      echo "    ERROR: Emulator ports (8080/9099/5001/9199/4000) are still in use."
+      echo "    Stop the blocking process or run: firebase emulators:stop"
+      exit 1
+    fi
   fi
-  sleep 2
-done
+
+  echo ">>> Starting Firebase emulators..."
+  cd "$ROOT_DIR"
+  EMULATOR_LOG="$(mktemp /tmp/rolekeeper-emulator-XXXX.log)"
+  firebase emulators:start \
+    --only auth,functions,firestore,storage \
+    --export-on-exit /tmp/rolekeeper-emulator-data \
+    --import /tmp/rolekeeper-emulator-data \
+    >"$EMULATOR_LOG" 2>&1 &
+  EMULATOR_PID=$!
+  STARTED_EMULATORS=1
+
+  echo "    Waiting for emulators..."
+  EMULATOR_READY=0
+  for i in {1..30}; do
+    if emulator_ui_ready; then
+      echo "    Emulators ready."
+      EMULATOR_READY=1
+      break
+    fi
+    if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+      echo "    ERROR: Firebase emulators exited before becoming ready."
+      tail -20 "$EMULATOR_LOG" 2>/dev/null || true
+      exit 1
+    fi
+    sleep 2
+  done
+
+  if [ "$EMULATOR_READY" -ne 1 ]; then
+    echo "    ERROR: Timed out waiting for emulator UI on port 4000."
+    tail -20 "$EMULATOR_LOG" 2>/dev/null || true
+    exit 1
+  fi
+fi
 
 # --- Flutter tests ---
 echo ""

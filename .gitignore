@@ -52,8 +52,9 @@ functions/test/fixtures/*-unscrubbed/
 # locally and are intentionally not tracked in git.
 tdd-mcp/
 .cursor/mcp.json
-.cursor/rules/tdd-worker.mdc
-.cursor/rules/planner.mdc
+# Agent rules are local; only app coding standards are tracked in git.
+.cursor/rules/*
+!.cursor/rules/error-handling.mdc
 .agent-context.md
 docs/tasks/
 SETUP.md
