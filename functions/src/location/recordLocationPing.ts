@@ -1,11 +1,7 @@
 import * as admin from "firebase-admin";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 
-import {
-  gameEventBase,
-  resolveGameTenantFromBody,
-  tenantKey,
-} from "../gameTenant";
+import { gameEventBase, resolveGameTenantFromBody } from "../gameTenant";
 import { sanitizeLocation, withGpsSource } from "./locationPayload";
 import { mintLocationPingDocId } from "./mintPingDocId";
 
@@ -20,6 +16,15 @@ export interface RecordLocationPingBody {
 export interface RecordLocationPingDeps {
   db: admin.firestore.Firestore;
   now?: () => admin.firestore.Timestamp;
+}
+
+function existingLastLocationTimestamp(
+  member: Record<string, unknown>
+): number | null {
+  const existing = member.lastLocation as Record<string, unknown> | undefined;
+  const ts = existing?.timestamp as admin.firestore.Timestamp | undefined;
+  if (!ts?.toDate) return null;
+  return ts.toDate().getTime();
 }
 
 export async function runRecordLocationPing(
@@ -89,17 +94,14 @@ export async function runRecordLocationPing(
 
   const now = deps.now?.() ?? admin.firestore.Timestamp.now();
   const pingId = mintLocationPingDocId(now);
+  const location = withGpsSource(loc);
 
   const payload: Record<string, unknown> = {
     id: pingId,
-    gameId: tenantKey(tenant),
-    tenantKey: tenantKey(tenant),
-    instanceId: tenant.instanceId,
-    eventSlug: tenant.eventSlug,
     playerId: uid,
     presenceState,
     inGame,
-    location: withGpsSource(loc),
+    location,
     timestamp: now,
   };
 
@@ -108,7 +110,36 @@ export async function runRecordLocationPing(
     payload.characterId = characterId;
   }
 
-  await db.collection(`${base}/locationPings`).doc(pingId).set(payload);
+  const lastLocation: Record<string, unknown> = {
+    latitude: location.latitude,
+    longitude: location.longitude,
+    source: location.source ?? "gps",
+    timestamp: now,
+    presenceState,
+    inGame,
+  };
+  if (typeof location.accuracy === "number") {
+    lastLocation.accuracy = location.accuracy;
+  }
+  if (typeof location.altitude === "number") {
+    lastLocation.altitude = location.altitude;
+  }
+
+  const batch = db.batch();
+  batch.set(db.collection(`${base}/locationPings`).doc(pingId), payload);
+
+  const existingTs = existingLastLocationTimestamp(member);
+  const shouldUpdateLastLocation =
+    existingTs === null || now.toDate().getTime() >= existingTs;
+  if (shouldUpdateLastLocation) {
+    batch.set(
+      db.doc(`${base}/members/${uid}`),
+      { lastLocation },
+      { merge: true }
+    );
+  }
+
+  await batch.commit();
 
   return { pingId };
 }
