@@ -72,4 +72,4 @@ jobs:
           firebase emulators:exec \
             --only auth,functions,firestore,storage \
             --project rolekeeper-7ddcc \
-            "cd functions && FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 node --test lib/"
+            "cd functions && GOOGLE_APPLICATION_CREDENTIALS= FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 FIREBASE_STORAGE_EMULATOR_HOST=localhost:9199 node --test lib/"
