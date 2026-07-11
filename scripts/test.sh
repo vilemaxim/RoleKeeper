@@ -132,8 +132,10 @@ if [ ${#FUNC_TESTS[@]} -eq 0 ]; then
   echo "    ERROR: no compiled *.test.js files found under functions/lib/"
   exit 1
 fi
+GOOGLE_APPLICATION_CREDENTIALS= \
 FIRESTORE_EMULATOR_HOST="localhost:8080" \
 FIREBASE_AUTH_EMULATOR_HOST="localhost:9099" \
+FIREBASE_STORAGE_EMULATOR_HOST="localhost:9199" \
 FUNCTIONS_EMULATOR_HOST="localhost:5001" \
   node --test "${FUNC_TESTS[@]}"
 echo "    Functions tests: PASSED (${#FUNC_TESTS[@]} files)"
