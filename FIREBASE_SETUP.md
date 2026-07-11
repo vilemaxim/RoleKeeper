@@ -250,7 +250,7 @@ RoleKeeper/
 ├── firestore.indexes.json # Firestore composite indexes
 ├── storage.rules          # Storage security rules
 ├── functions/             # Cloud Functions (Node.js/TypeScript)
-│   ├── src/index.ts       # syncOfflineChanges, LarpManager sync, etc.
+│   ├── src/index.ts       # LarpManager sync, location ping, integrations, etc.
 │   ├── src/larpmanager/   # LM HTTP client + sync + tests
 │   ├── package.json
 │   └── tsconfig.json
@@ -266,7 +266,7 @@ RoleKeeper/
 |---------|---------|
 | **Firebase Auth** | User sign-in (email, Google, Apple) |
 | **Cloud Firestore** | Games (multi-tenant), characters, rules per game, events, templates |
-| **Cloud Functions** | syncOfflineChanges, active game events, **LarpManager integration save + scheduled/callable sync**, etc. |
+| **Cloud Functions** | Active game events, **LarpManager integration save + scheduled/callable sync**, location ping, integrations, etc. |
 | **Firebase Storage** | Avatars, character portraits, event media (deferred until needed) |
 | **Firebase Hosting** | Serves the Flutter web app |
 | **FCM** | Push notifications (Phase 2+) |
