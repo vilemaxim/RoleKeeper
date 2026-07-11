@@ -25,5 +25,25 @@ void main() {
       final forgedCode = forgeTotp.generateCode();
       expect(defaultTotp.verify(forgedCode), isFalse);
     });
+
+    test('TotpService without cached seed cannot generate offline codes', () {
+      final totp = TotpService();
+      expect(totp.canGenerateOfflineCode, isFalse);
+      expect(totp.verify('123456'), isFalse);
+      expect(
+        () => totp.generateCode(),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('per-event seeds are isolated from each other', () {
+      const secretA = 'JBSWY3DPEHPK3PXP';
+      const secretB = 'GEZDGNBVGY3TQOJQ';
+      final totpA = TotpService(seed: secretA);
+      final totpB = TotpService(seed: secretB);
+      final codeA = totpA.generateCode();
+      expect(totpA.verify(codeA), isTrue);
+      expect(totpB.verify(codeA), isFalse);
+    });
   });
 }

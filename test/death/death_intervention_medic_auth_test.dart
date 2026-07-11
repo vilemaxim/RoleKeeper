@@ -86,5 +86,41 @@ void main() {
       expect(claimSnap.exists, isTrue);
       expect(claimSnap.data()!['medicPlayerId'], 'staff-medic-uid');
     });
+
+    test('owner can claim intervention client-side', () async {
+      final setup = await serviceForRole(
+        role: GameRole.owner,
+        uid: 'owner-medic-uid',
+      );
+
+      await setup.svc.claimIntervention(
+        activityEventId: 'activity-event-owner',
+        fallenPlayerId: 'fallen-player-uid',
+      );
+
+      final claimSnap = await GameFirestorePaths.deathInterventionClaims(
+        setup.firestore,
+        kTestGameTenant,
+      ).doc('activity-event-owner').get();
+      expect(claimSnap.exists, isTrue);
+    });
+
+    test('superAdmin can claim intervention client-side', () async {
+      final setup = await serviceForRole(
+        role: GameRole.superAdmin,
+        uid: 'superadmin-medic-uid',
+      );
+
+      await setup.svc.claimIntervention(
+        activityEventId: 'activity-event-superadmin',
+        fallenPlayerId: 'fallen-player-uid',
+      );
+
+      final claimSnap = await GameFirestorePaths.deathInterventionClaims(
+        setup.firestore,
+        kTestGameTenant,
+      ).doc('activity-event-superadmin').get();
+      expect(claimSnap.exists, isTrue);
+    });
   });
 }
