@@ -24,6 +24,9 @@ extension GameRoleX on GameRole {
       this == GameRole.owner ||
       this == GameRole.superAdmin ||
       this == GameRole.staff;
+
+  /// Death intervention claims (mirrors Firestore `isStaffOrAbove` gate).
+  bool get canPerformDeathIntervention => canConfigureStaffIntegrations;
 }
 
 GameRole gameRoleFromWire(String? raw) {

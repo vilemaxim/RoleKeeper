@@ -40,6 +40,10 @@ import {
   runConfigureHomeAssistantIntegration,
   type ConfigureHomeAssistantBody,
 } from "./integrations/configureHomeAssistantIntegration";
+import {
+  runGetDeathInterventionSecrets,
+  type DeathInterventionSecretsBody,
+} from "./deathInterventionSecrets";
 
 admin.initializeApp();
 
@@ -682,5 +686,15 @@ export const configureHomeAssistantIntegration = onCall(
     runConfigureHomeAssistantIntegration(
       { db: admin.firestore() },
       request as CallableRequest<ConfigureHomeAssistantBody>
+    )
+);
+
+/** Per-event TOTP and death QR signing secrets for authenticated members. */
+export const getDeathInterventionSecrets = onCall(
+  { region: REGION },
+  async (request) =>
+    runGetDeathInterventionSecrets(
+      { db: admin.firestore() },
+      request as CallableRequest<DeathInterventionSecretsBody>
     )
 );

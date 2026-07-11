@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../models/game_role.dart';
 import '../models/game_tenant_ref.dart';
 import '../utils/game_firestore_paths.dart';
 import 'game_context_service.dart';
+import 'game_membership_service.dart';
 
 /// Medic claims under `games/{instanceId}/events/{eventSlug}/deathInterventionClaims`.
 class DeathInterventionClaimsService {
@@ -11,13 +13,16 @@ class DeathInterventionClaimsService {
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
     GameTenantRef? tenant,
+    GameMembershipService? membershipService,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
-        _tenant = tenant ?? GameContextService.instance.currentTenant;
+        _tenant = tenant ?? GameContextService.instance.currentTenant,
+        _membershipService = membershipService;
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
   final GameTenantRef? _tenant;
+  final GameMembershipService? _membershipService;
 
   GameTenantRef get _resolvedTenant {
     final t = _tenant;
@@ -45,6 +50,13 @@ class DeathInterventionClaimsService {
     final medicId = _medicId;
     if (medicId == null) throw StateError('Not authenticated');
     if (activityEventId.isEmpty) throw ArgumentError('activityEventId required');
+
+    final membership = _membershipService ??
+        GameMembershipService(firestore: _firestore, auth: _auth);
+    final role = await membership.getRoleInGame(_resolvedTenant.tenantKey);
+    if (!role.canPerformDeathIntervention) {
+      throw StateError('Only staff can claim death intervention');
+    }
 
     await _claimsCol.doc(activityEventId).set({
       'fallenPlayerId': fallenPlayerId,

@@ -8,8 +8,10 @@ import '../models/death_rules.dart';
 import '../services/activity_events_service.dart';
 import '../services/character_status_service.dart';
 import '../services/death_intervention_claims_service.dart';
+import '../services/death_intervention_secrets_service.dart';
 import '../services/death_timer_service.dart';
 import '../services/rules_repository.dart';
+import '../utils/death_qr_parser.dart';
 import 'death_offline_intervention_screen.dart';
 
 String _capitalize(String s) {
@@ -34,8 +36,10 @@ class _DeathTimerScreenState extends State<DeathTimerScreen> {
   final _claimsService = DeathInterventionClaimsService();
   final _statusService = CharacterStatusService();
   final _timerService = DeathTimerService.instance;
+  final _secretsService = DeathInterventionSecretsService();
 
   bool _initialized = false;
+  String? _qrSigningSecret;
 
   @override
   void initState() {
@@ -46,6 +50,13 @@ class _DeathTimerScreenState extends State<DeathTimerScreen> {
 
   Future<void> _init() async {
     var rules = await _rulesRepo.getDeathRules();
+    if (!mounted) return;
+    try {
+      final secrets = await _secretsService.resolveSecrets();
+      _qrSigningSecret = secrets?.qrSigningSecret;
+    } catch (_) {
+      // QR signing unavailable offline until secrets were cached earlier.
+    }
     if (!mounted) return;
     if (!rules.enabled) {
       rules = DeathRules(
@@ -312,11 +323,23 @@ class _DeathTimerScreenState extends State<DeathTimerScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
-                QrImageView(
-                  data: 'rolekeeper:death:medic:$shortId:$playerId:${t.activityEventId}',
-                  version: QrVersions.auto,
-                  size: 200,
-                ),
+                if (_qrSigningSecret != null)
+                  QrImageView(
+                    data: buildDeathMedicQrPayload(
+                      shortId: shortId,
+                      fallenPlayerId: playerId,
+                      activityEventId: t.activityEventId,
+                      signingSecret: _qrSigningSecret!,
+                    ),
+                    version: QrVersions.auto,
+                    size: 200,
+                  )
+                else
+                  Text(
+                    'Connect online once to enable medic QR codes for this event.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: _openOfflineIntervention,
@@ -344,11 +367,23 @@ class _DeathTimerScreenState extends State<DeathTimerScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                QrImageView(
-                  data: 'rolekeeper:death:revival-confirm:$shortId:$playerId:${t.activityEventId}',
-                  version: QrVersions.auto,
-                  size: 200,
-                ),
+                if (_qrSigningSecret != null)
+                  QrImageView(
+                    data: buildDeathRevivalConfirmQrPayload(
+                      shortId: shortId,
+                      fallenPlayerId: playerId,
+                      activityEventId: t.activityEventId,
+                      signingSecret: _qrSigningSecret!,
+                    ),
+                    version: QrVersions.auto,
+                    size: 200,
+                  )
+                else
+                  Text(
+                    'Connect online once to enable revival confirmation QR.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: _recordInterventionComplete,

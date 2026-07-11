@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/activity_events_service.dart';
+import '../services/death_intervention_secrets_service.dart';
 import '../services/rules_repository.dart';
 import 'medic_offline_intervention_screen.dart';
 import '../services/death_intervention_claims_service.dart';
@@ -26,15 +27,27 @@ enum _MedicPhase { idle, claimed, confirming }
 class _MedicScanScreenState extends State<MedicScanScreen> {
   final _claimsService = DeathInterventionClaimsService();
   final _eventsService = ActivityEventsService();
+  final _secretsService = DeathInterventionSecretsService();
 
   _MedicPhase _phase = _MedicPhase.idle;
   String? _error;
   String _roleName = 'medic';
+  String? _qrSigningSecret;
 
   @override
   void initState() {
     super.initState();
     _loadRules();
+    _loadSigningSecret();
+  }
+
+  Future<void> _loadSigningSecret() async {
+    try {
+      final secrets = await _secretsService.resolveSecrets();
+      if (mounted) setState(() => _qrSigningSecret = secrets?.qrSigningSecret);
+    } catch (_) {
+      // Offline until secrets were cached while online.
+    }
   }
 
   Future<void> _loadRules() async {
@@ -59,7 +72,18 @@ class _MedicScanScreenState extends State<MedicScanScreen> {
 
     setState(() => _error = null);
 
-    final parsed = parseDeathInterventionQr(raw);
+    final signingSecret = _qrSigningSecret;
+    if (signingSecret == null || signingSecret.isEmpty) {
+      setState(() => _error = 'Connect online once to verify medic QR codes.');
+      return;
+    }
+
+    if (!verifyDeathInterventionQr(raw, signingSecret: signingSecret)) {
+      setState(() => _error = 'Invalid or unsigned QR code');
+      return;
+    }
+
+    final parsed = parseDeathInterventionQr(raw, signingSecret: signingSecret);
     if (parsed == null) {
       setState(() => _error = 'Invalid QR code');
       return;

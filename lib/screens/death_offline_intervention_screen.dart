@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/death_rules.dart';
 import '../services/activity_events_service.dart';
 import '../services/characters_repository.dart';
+import '../services/death_intervention_secrets_service.dart';
 import '../services/totp_service.dart';
 import '../utils/short_id.dart';
 
@@ -30,7 +31,8 @@ class DeathOfflineInterventionScreen extends StatefulWidget {
 
 class _DeathOfflineInterventionScreenState
     extends State<DeathOfflineInterventionScreen> {
-  final _totp = TotpService();
+  final _secretsService = DeathInterventionSecretsService();
+  TotpService? _totp;
   final _eventsService = ActivityEventsService();
   final _charsRepo = CharactersRepository();
   String _roleName() => widget.rules.interventionRoleName.isNotEmpty
@@ -48,6 +50,41 @@ class _DeathOfflineInterventionScreenState
   bool _interventionComplete = false;
   bool _timedOutToDeath = false;
   Timer? _timeoutTimer;
+  bool _loadingSecrets = true;
+  String? _secretsUnavailableMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTotp();
+  }
+
+  Future<void> _loadTotp() async {
+    try {
+      final secrets = await _secretsService.resolveSecrets();
+      if (!mounted) return;
+      if (secrets == null) {
+        setState(() {
+          _loadingSecrets = false;
+          _secretsUnavailableMessage =
+              'Offline intervention requires connecting online once during this event.';
+        });
+        return;
+      }
+      setState(() {
+        _totp = TotpService(seed: secrets.totpSecret);
+        _loadingSecrets = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadingSecrets = false;
+          _secretsUnavailableMessage =
+              'Could not load offline codes. Connect online and try again.';
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -61,13 +98,18 @@ class _DeathOfflineInterventionScreenState
   }
 
   Future<void> _submitFirst() async {
+    final totp = _totp;
+    if (totp == null) {
+      setState(() => _error = _secretsUnavailableMessage ?? 'Offline codes unavailable');
+      return;
+    }
     final medicShortId = _medicIdController.text.trim().toUpperCase();
     final code = _totpController.text.trim();
     if (medicShortId.isEmpty || code.length != 6) {
       setState(() => _error = 'Enter ${_roleName()} ID (3 chars) and 6-digit code');
       return;
     }
-    if (!_totp.verify(code)) {
+    if (!totp.verify(code)) {
       setState(() => _error = 'Invalid code');
       return;
     }
@@ -118,13 +160,18 @@ class _DeathOfflineInterventionScreenState
 
   Future<void> _submitSecond() async {
     _timeoutTimer?.cancel();
+    final totp = _totp;
+    if (totp == null) {
+      setState(() => _error = _secretsUnavailableMessage ?? 'Offline codes unavailable');
+      return;
+    }
     final medicShortId = _medicIdController2.text.trim().toUpperCase();
     final code = _totpController2.text.trim();
     if (medicShortId.isEmpty || code.length != 6) {
       setState(() => _error = 'Enter ${_roleName()} ID (3 chars) and 6-digit code');
       return;
     }
-    if (!_totp.verify(code)) {
+    if (!totp.verify(code)) {
       setState(() => _error = 'Invalid code');
       return;
     }
@@ -147,6 +194,26 @@ class _DeathOfflineInterventionScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingSecrets) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Offline Intervention')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_secretsUnavailableMessage != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Offline Intervention')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              _secretsUnavailableMessage!,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Offline Intervention')),
       body: Padding(

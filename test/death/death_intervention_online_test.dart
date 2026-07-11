@@ -2,10 +2,14 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rolekeeper/constants/game_constants.dart';
+import 'package:rolekeeper/models/game_role.dart';
 import 'package:rolekeeper/services/death_intervention_claims_service.dart';
 import 'package:rolekeeper/services/game_context_service.dart';
+import 'package:rolekeeper/services/game_membership_service.dart';
 import 'package:rolekeeper/utils/death_qr_parser.dart';
 import 'package:rolekeeper/utils/game_firestore_paths.dart';
+
+import '../helpers/game_tenant_test_paths.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -17,13 +21,18 @@ void main() {
       const fallenId = 'fallen-player-uid';
       const activityId = 'activity-event-123';
       const shortId = 'Z9Y';
+      const signingSecret = 'online-test-signing-secret';
+
+      GameContextService.instance.currentTenantForTest = kTestGameTenant;
 
       final raw = buildDeathMedicQrPayload(
         shortId: shortId,
         fallenPlayerId: fallenId,
         activityEventId: activityId,
+        signingSecret: signingSecret,
       );
-      final parsed = parseDeathInterventionQr(raw);
+      expect(verifyDeathInterventionQr(raw, signingSecret: signingSecret), isTrue);
+      final parsed = parseDeathInterventionQr(raw, signingSecret: signingSecret);
       expect(parsed, isNotNull);
       expect(parsed!.activityEventId, activityId);
       expect(parsed.fallenPlayerId, fallenId);
@@ -31,6 +40,13 @@ void main() {
       final medicUser = MockUser(uid: 'medic-uid-7', email: 'medic@test.com');
       final auth = MockFirebaseAuth(mockUser: medicUser, signedIn: true);
       final fake = FakeFirebaseFirestore();
+      await seedGameTenantDocs(fake, kTestGameTenant);
+      await GameMembershipService(firestore: fake, auth: auth).addUserToGame(
+        tenant: kTestGameTenant,
+        userId: 'medic-uid-7',
+        role: GameRole.staff,
+      );
+
       final svc = DeathInterventionClaimsService(
         firestore: fake,
         auth: auth,
