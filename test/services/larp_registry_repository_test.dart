@@ -53,72 +53,80 @@ void main() {
       expect(e.organizerAccessConfigured, isTrue);
     });
 
-    test('markOrganizerAccessConfigured creates when absent', () async {
-      final auth = MockFirebaseAuth(
-        mockUser: MockUser(uid: 'creator', email: 'c@b.com'),
-        signedIn: true,
-      );
-      final firestore = FakeFirebaseFirestore();
-      final repo = LarpRegistryRepository(firestore: firestore, auth: auth);
+    test(
+      'markOrganizerAccessConfigured does not set organizerAccessConfigured on create (Task 005 M1)',
+      () async {
+        final auth = MockFirebaseAuth(
+          mockUser: MockUser(uid: 'creator', email: 'c@b.com'),
+          signedIn: true,
+        );
+        final firestore = FakeFirebaseFirestore();
+        final repo = LarpRegistryRepository(firestore: firestore, auth: auth);
 
-      const newTenant = GameTenantRef(
-        instanceId: 'x.test',
-        eventSlug: 'slug',
-      );
+        const newTenant = GameTenantRef(
+          instanceId: 'x.test',
+          eventSlug: 'slug',
+        );
 
-      await repo.markOrganizerAccessConfigured(
-        tenant: newTenant,
-        larpManagerBaseUrl: 'https://x.test',
-        larpManagerEventSlug: 'slug',
-        displayName: 'Display',
-      );
+        await repo.markOrganizerAccessConfigured(
+          tenant: newTenant,
+          larpManagerBaseUrl: 'https://x.test',
+          larpManagerEventSlug: 'slug',
+          displayName: 'Display',
+        );
 
-      final snap = await GameFirestorePaths.larpRegistryEvent(firestore, newTenant).get();
-      expect(snap.exists, isTrue);
-      final d = snap.data()!;
-      expect(d['tenantKey'], newTenant.tenantKey);
-      expect(d['larpManagerBaseUrl'], 'https://x.test');
-      expect(d['larpManagerEventSlug'], 'slug');
-      expect(d['displayName'], 'Display');
-      expect(d['organizerAccessConfigured'], isTrue);
-      expect(d['createdByUid'], 'creator');
-    });
+        final snap =
+            await GameFirestorePaths.larpRegistryEvent(firestore, newTenant).get();
+        expect(snap.exists, isTrue);
+        final d = snap.data()!;
+        expect(d['tenantKey'], newTenant.tenantKey);
+        expect(d['larpManagerBaseUrl'], 'https://x.test');
+        expect(d['larpManagerEventSlug'], 'slug');
+        expect(d['displayName'], 'Display');
+        expect(d['organizerAccessConfigured'], isNot(true));
+        expect(d['createdByUid'], 'creator');
+      },
+    );
 
-    test('markOrganizerAccessConfigured merges when doc exists', () async {
-      final auth = MockFirebaseAuth(
-        mockUser: MockUser(uid: 'u2', email: 'u2@b.com'),
-        signedIn: true,
-      );
-      final firestore = FakeFirebaseFirestore();
-      const oldTenant = GameTenantRef(
-        instanceId: 'old.test',
-        eventSlug: 'old_slug',
-      );
-      await GameFirestorePaths.larpRegistryEvent(firestore, oldTenant).set({
-        'tenantKey': oldTenant.tenantKey,
-        'larpManagerBaseUrl': 'https://old',
-        'larpManagerEventSlug': 'old_slug',
-        'displayName': 'Old',
-        'organizerAccessConfigured': false,
-        'createdByUid': 'first',
-      });
+    test(
+      'markOrganizerAccessConfigured does not flip organizerAccessConfigured on merge (Task 005 M1)',
+      () async {
+        final auth = MockFirebaseAuth(
+          mockUser: MockUser(uid: 'u2', email: 'u2@b.com'),
+          signedIn: true,
+        );
+        final firestore = FakeFirebaseFirestore();
+        const oldTenant = GameTenantRef(
+          instanceId: 'old.test',
+          eventSlug: 'old_slug',
+        );
+        await GameFirestorePaths.larpRegistryEvent(firestore, oldTenant).set({
+          'tenantKey': oldTenant.tenantKey,
+          'larpManagerBaseUrl': 'https://old',
+          'larpManagerEventSlug': 'old_slug',
+          'displayName': 'Old',
+          'organizerAccessConfigured': false,
+          'createdByUid': 'first',
+        });
 
-      final repo = LarpRegistryRepository(firestore: firestore, auth: auth);
-      await repo.markOrganizerAccessConfigured(
-        tenant: oldTenant,
-        larpManagerBaseUrl: 'https://new',
-        larpManagerEventSlug: 'new_slug',
-        displayName: 'New name',
-      );
+        final repo = LarpRegistryRepository(firestore: firestore, auth: auth);
+        await repo.markOrganizerAccessConfigured(
+          tenant: oldTenant,
+          larpManagerBaseUrl: 'https://new',
+          larpManagerEventSlug: 'new_slug',
+          displayName: 'New name',
+        );
 
-      final snap = await GameFirestorePaths.larpRegistryEvent(firestore, oldTenant).get();
-      final d = snap.data()!;
-      expect(d['createdByUid'], 'first');
-      expect(d['larpManagerBaseUrl'], 'https://new');
-      expect(d['larpManagerEventSlug'], 'new_slug');
-      expect(d['displayName'], 'New name');
-      expect(d['organizerAccessConfigured'], isTrue);
-    });
+        final snap =
+            await GameFirestorePaths.larpRegistryEvent(firestore, oldTenant).get();
+        final d = snap.data()!;
+        expect(d['createdByUid'], 'first');
+        expect(d['larpManagerBaseUrl'], 'https://new');
+        expect(d['larpManagerEventSlug'], 'new_slug');
+        expect(d['displayName'], 'New name');
+        expect(d['organizerAccessConfigured'], isNot(true));
+      },
+    );
 
     test('markOrganizerAccessConfigured no-op when signed out', () async {
       final auth = MockFirebaseAuth(signedIn: false);
