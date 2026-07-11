@@ -26,5 +26,70 @@ void main() {
       const raw = 'rolekeeper:death:medic:A1B:player-uid-1:evt-99';
       expect(isDeathInterventionMedicQr(raw), isFalse);
     });
+
+    test('verifyDeathInterventionQr accepts payload signed with event secret', () {
+      const signingSecret = 'event-signing-secret';
+      const shortId = 'A1B';
+      const fallenId = 'player-uid-1';
+      const eventId = 'evt-99';
+      final raw = buildDeathMedicQrPayload(
+        shortId: shortId,
+        fallenPlayerId: fallenId,
+        activityEventId: eventId,
+        signingSecret: signingSecret,
+      );
+      expect(verifyDeathInterventionQr(raw, signingSecret: signingSecret), isTrue);
+    });
+
+    test('verifyDeathInterventionQr rejects forged HMAC', () {
+      const signingSecret = 'event-signing-secret';
+      final raw = buildDeathMedicQrPayload(
+        shortId: 'A1B',
+        fallenPlayerId: 'player-uid-1',
+        activityEventId: 'evt-99',
+        signingSecret: signingSecret,
+      );
+      final tampered = raw.replaceFirst(
+        raw.split(':').last,
+        '00000000000000000000000000000000',
+      );
+      expect(
+        verifyDeathInterventionQr(tampered, signingSecret: signingSecret),
+        isFalse,
+      );
+    });
+
+    test('verifyDeathInterventionQr rejects payload signed with wrong secret', () {
+      final raw = buildDeathMedicQrPayload(
+        shortId: 'A1B',
+        fallenPlayerId: 'player-uid-1',
+        activityEventId: 'evt-99',
+        signingSecret: 'correct-secret',
+      );
+      expect(
+        verifyDeathInterventionQr(raw, signingSecret: 'wrong-secret'),
+        isFalse,
+      );
+    });
+
+    test('example v2 QR fails verification without correct secret', () {
+      expect(
+        verifyDeathInterventionQr(
+          kSignedMedicQrV2Example,
+          signingSecret: 'not-the-event-secret',
+        ),
+        isFalse,
+      );
+    });
+
+    test('medic scan path rejects v2 QR with invalid HMAC (H5)', () {
+      const raw = 'rolekeeper:death:v2:medic:A1B:player-uid-1:evt-99:'
+          '00000000000000000000000000000000';
+      expect(
+        verifyDeathInterventionQr(raw, signingSecret: 'event-secret'),
+        isFalse,
+      );
+      expect(parseDeathInterventionQr(raw, signingSecret: 'event-secret'), isNull);
+    });
   });
 }
