@@ -161,6 +161,85 @@ test("staff member can create deathInterventionClaims", async () => {
   );
 });
 
+// --- Task 005 M1: larpRegistry organizerAccessConfigured server-only ---
+
+function larpRegistryEventPath(instanceId: string, eventSlug: string): string {
+  return `larpRegistry/${instanceId}/events/${eventSlug}`;
+}
+
+function larpRegistryCreatePayload(
+  instanceId: string,
+  eventSlug: string,
+  uid: string,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    tenantKey: `${instanceId}::${eventSlug}`,
+    instanceId,
+    eventSlug,
+    larpManagerBaseUrl: `https://${instanceId}`,
+    larpManagerEventSlug: eventSlug,
+    displayName: "Test event",
+    createdByUid: uid,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...extra,
+  };
+}
+
+test(
+  "authenticated user cannot create larpRegistry event with client-supplied organizerAccessConfigured:true (Task 005 M1)",
+  async () => {
+    const db = testEnv.authenticatedContext(PLAYER_UID).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, larpRegistryEventPath(INSTANCE_ID, EVENT_SLUG)),
+        larpRegistryCreatePayload(INSTANCE_ID, EVENT_SLUG, PLAYER_UID, {
+          organizerAccessConfigured: true,
+        })
+      )
+    );
+  }
+);
+
+test(
+  "authenticated user can create larpRegistry event without organizerAccessConfigured flag (Task 005 M1)",
+  async () => {
+    const db = testEnv.authenticatedContext(PLAYER_UID).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, larpRegistryEventPath(INSTANCE_ID, "new-event")),
+        larpRegistryCreatePayload(INSTANCE_ID, "new-event", PLAYER_UID)
+      )
+    );
+  }
+);
+
+test(
+  "authenticated user cannot update larpRegistry event to set organizerAccessConfigured:true (Task 005 M1)",
+  async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .doc(larpRegistryEventPath(INSTANCE_ID, EVENT_SLUG))
+        .set(
+          larpRegistryCreatePayload(INSTANCE_ID, EVENT_SLUG, PLAYER_UID, {
+            organizerAccessConfigured: false,
+          })
+        );
+    });
+
+    const db = testEnv.authenticatedContext(PLAYER_UID).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, larpRegistryEventPath(INSTANCE_ID, EVENT_SLUG)),
+        { organizerAccessConfigured: true },
+        { merge: true }
+      )
+    );
+  }
+);
+
 // --- M4: itemTransfers read denied ---
 
 test("authenticated user cannot read itemTransfers", async () => {

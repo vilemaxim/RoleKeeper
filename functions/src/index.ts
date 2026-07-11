@@ -20,8 +20,10 @@ import { loadLarpManagerSyncConfigForGame } from "./larpmanager/integrationConfi
 import { resolveLarpManagerPlayerAccess } from "./larpmanager/playerAccess";
 import { runLarpManagerSync } from "./larpmanager/sync";
 import { runSyncMyLarpManagerCharacter } from "./larpmanager/syncMyCharacter";
-import { toHttpsErrorForLarpManagerCredentialSave } from "./larpmanager/gcpErrors";
 import { upsertLarpManagerAuthSecret } from "./larpmanager/secretManager";
+import {
+  runSaveLarpManagerIntegrationConfig,
+} from "./larpmanager/saveLarpManagerIntegrationConfig";
 import {
   larpManagerSyncSettingsRef,
   parseLarpManagerSyncSettings,
@@ -271,137 +273,14 @@ export const saveLarpManagerIntegrationConfig = onCall(
   { region: REGION, memory: "512MiB", timeoutSeconds: 120 },
   async (request) => {
     try {
-      if (!request.auth?.uid) {
-        throw new HttpsError("unauthenticated", "Authentication required");
-      }
-      const data = request.data as {
-        gameId?: string;
-        instanceId?: string;
-        eventSlug?: string;
-        baseUrl?: string;
-        loginPath?: string;
-        username?: string;
-        password?: string;
-      };
-      const tenant = resolveGameTenantFromBody(data);
-      if (!tenant) {
-        throw new HttpsError(
-          "invalid-argument",
-          "gameId (tenantKey) or instanceId+eventSlug is required"
-        );
-      }
-
-      const base = gameEventBase(tenant);
-      const tKey = tenantKey(tenant);
-
-      const memberSnap = await admin
-        .firestore()
-        .doc(`${base}/members/${request.auth.uid}`)
-        .get();
-      if (!memberSnap.exists) {
-        throw new HttpsError("permission-denied", "Not a member of this game");
-      }
-      const role = (memberSnap.data() as { role?: string })?.role;
-      const intRef = admin
-        .firestore()
-        .doc(`${base}/larpManagerIntegration/config`);
-      const existing = await intRef.get();
-      const hadCreds = existing.data()?.credentialsConfigured === true;
-
-      if (role !== "owner" && role !== "superAdmin" && hadCreds) {
-        throw new HttpsError(
-          "permission-denied",
-          "Only owner or superAdmin can configure LarpManager integration"
-        );
-      }
-
-      const baseUrl = String(data.baseUrl ?? "").trim();
-      const eventSlug = String(data.eventSlug ?? "").trim();
-      if (!baseUrl || !eventSlug) {
-        throw new HttpsError(
-          "invalid-argument",
-          "baseUrl and eventSlug are required"
-        );
-      }
-
-      const loginPath =
-        String(data.loginPath ?? "/login/").trim() || "/login/";
-
-      const u = typeof data.username === "string" ? data.username.trim() : "";
-      const p = typeof data.password === "string" ? data.password : "";
-      const bothProvided = u.length > 0 && p.length > 0;
-      const bothEmpty = u.length === 0 && p.length === 0;
-
-      if (!bothProvided && !bothEmpty) {
-        throw new HttpsError(
-          "invalid-argument",
-          "Provide both username and password, or leave both empty to keep existing credentials"
-        );
-      }
-
-      const db = admin.firestore();
-      const uid = request.auth.uid;
-
-      let secretUpdated = false;
-      let projectId: string;
-      try {
-        projectId = getGoogleCloudProjectId();
-      } catch (e) {
-        logger.error("saveLarpManagerIntegrationConfig: project id", e);
-        throw toHttpsErrorForLarpManagerCredentialSave(e, "unknown");
-      }
-
-      if (bothProvided) {
-        const payload = `password:${u}:${p}`;
-        try {
-          await upsertLarpManagerAuthSecret(projectId, tKey, payload);
-        } catch (e) {
-          logger.error("saveLarpManagerIntegrationConfig: Secret Manager", e);
-          throw toHttpsErrorForLarpManagerCredentialSave(e, projectId);
-        }
-        secretUpdated = true;
-      }
-
-      if (!hadCreds && !secretUpdated) {
-        throw new HttpsError(
-          "failed-precondition",
-          "Username and password are required the first time you save LarpManager integration"
-        );
-      }
-
-      // Task 012 / ADR 0001: no `fetchDetails` key on the saved payload.
-      // Legacy `fetchDetails: bool` on existing docs is tolerated by the
-      // loader (`parseIntegrationDoc`) and is overwritten on next save
-      // here only insofar as merge writes leave untouched fields alone.
-      await intRef.set(
+      return await runSaveLarpManagerIntegrationConfig(
         {
-          baseUrl,
-          eventSlug,
-          loginPath,
-          credentialsConfigured: hadCreds || secretUpdated,
-          tenantKey: tKey,
-          instanceId: tenant.instanceId,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedByUid: uid,
+          db: admin.firestore(),
+          getProjectId: getGoogleCloudProjectId,
+          upsertSecret: upsertLarpManagerAuthSecret,
         },
-        { merge: true }
+        request
       );
-
-      // Bootstrap: first person to save credentials becomes owner so they can manage the game.
-      if (
-        secretUpdated &&
-        !hadCreds &&
-        role !== "owner" &&
-        role !== "superAdmin"
-      ) {
-        const ownerPatch = { role: "owner" };
-        await db.doc(`${base}/members/${uid}`).set(ownerPatch, { merge: true });
-        await db.doc(`users/${uid}/gameMemberships/${tKey}`).set(ownerPatch, {
-          merge: true,
-        });
-      }
-
-      return { ok: true, bootstrapOwner: secretUpdated && !hadCreds };
     } catch (e) {
       if (e instanceof HttpsError) {
         throw e;

@@ -27,6 +27,8 @@ class LarpRegistryRepository {
     return LarpRegistryEntry.fromMap(tenant, snap.data());
   }
 
+  /// Writes client-safe registry metadata only. `organizerAccessConfigured` is
+  /// set server-side by `saveLarpManagerIntegrationConfig` after LM verification.
   Future<void> markOrganizerAccessConfigured({
     required GameTenantRef tenant,
     required String larpManagerBaseUrl,
@@ -39,33 +41,23 @@ class LarpRegistryRepository {
     final now = FieldValue.serverTimestamp();
     final ref = _ref(tenant);
     final snap = await ref.get();
+    final payload = {
+      'tenantKey': tenant.tenantKey,
+      'instanceId': tenant.instanceId,
+      'eventSlug': tenant.eventSlug,
+      'larpManagerBaseUrl': larpManagerBaseUrl,
+      'larpManagerEventSlug': larpManagerEventSlug,
+      'displayName': displayName,
+      'updatedAt': now,
+    };
     if (!snap.exists) {
       await ref.set({
-        'tenantKey': tenant.tenantKey,
-        'instanceId': tenant.instanceId,
-        'eventSlug': tenant.eventSlug,
-        'larpManagerBaseUrl': larpManagerBaseUrl,
-        'larpManagerEventSlug': larpManagerEventSlug,
-        'displayName': displayName,
-        'organizerAccessConfigured': true,
+        ...payload,
         'createdByUid': uid,
         'createdAt': now,
-        'updatedAt': now,
       });
     } else {
-      await ref.set(
-        {
-          'tenantKey': tenant.tenantKey,
-          'instanceId': tenant.instanceId,
-          'eventSlug': tenant.eventSlug,
-          'larpManagerBaseUrl': larpManagerBaseUrl,
-          'larpManagerEventSlug': larpManagerEventSlug,
-          'displayName': displayName,
-          'organizerAccessConfigured': true,
-          'updatedAt': now,
-        },
-        SetOptions(merge: true),
-      );
+      await ref.set(payload, SetOptions(merge: true));
     }
   }
 }

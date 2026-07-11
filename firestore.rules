@@ -120,12 +120,16 @@ service cloud.firestore {
           && request.resource.data.instanceId == instanceId
           && request.resource.data.eventSlug == eventSlug
           && request.resource.data.createdByUid == request.auth.uid
-          && request.resource.data.organizerAccessConfigured == true;
+          && request.resource.data.get('organizerAccessConfigured', false) != true;
         allow update: if isAuthenticated()
           && resource.data.instanceId == instanceId
           && resource.data.eventSlug == eventSlug
           && request.resource.data.instanceId == instanceId
           && request.resource.data.eventSlug == eventSlug
+          && (
+            request.resource.data.get('organizerAccessConfigured', false) != true
+            || resource.data.get('organizerAccessConfigured', false) == true
+          )
           && (
             resource.data.createdByUid == request.auth.uid
             || canConfigureGameRules(instanceId, eventSlug)
