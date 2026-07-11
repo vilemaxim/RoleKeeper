@@ -6,10 +6,12 @@ import {
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
 
-export {
+import {
   seedTenantMember,
   tenantBase,
 } from "./storageRulesTestEnv";
+
+export { seedTenantMember, tenantBase };
 
 const REPO_ROOT = join(__dirname, "../../..");
 
@@ -70,5 +72,63 @@ export async function seedItemTransfer(
       toCharacterId: "char-b",
       itemId: "item-1",
     });
+  });
+}
+
+export async function seedLarpManagerMirrorChar(
+  testEnv: RulesTestEnvironment,
+  opts: {
+    instanceId: string;
+    eventSlug: string;
+    characterUuid: string;
+    displayName?: string;
+  }
+): Promise<void> {
+  const { instanceId, eventSlug, characterUuid, displayName = "Mirror Char" } =
+    opts;
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx
+      .firestore()
+      .doc(
+        `${tenantBase(instanceId, eventSlug)}/larpManagerMirrorChars/${characterUuid}`
+      )
+      .set({
+        characterUuid,
+        displayName,
+        syncedAt: new Date(),
+      });
+  });
+}
+
+export async function seedDeathInterventionClaim(
+  testEnv: RulesTestEnvironment,
+  opts: {
+    instanceId: string;
+    eventSlug: string;
+    activityEventId: string;
+    medicPlayerId: string;
+    fallenPlayerId: string;
+  }
+): Promise<void> {
+  const {
+    instanceId,
+    eventSlug,
+    activityEventId,
+    medicPlayerId,
+    fallenPlayerId,
+  } = opts;
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx
+      .firestore()
+      .doc(
+        `${tenantBase(instanceId, eventSlug)}/deathInterventionClaims/${activityEventId}`
+      )
+      .set({
+        activityEventId,
+        medicPlayerId,
+        fallenPlayerId,
+      });
   });
 }

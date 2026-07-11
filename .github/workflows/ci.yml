@@ -69,7 +69,8 @@ jobs:
 
       - name: Functions tests (with emulators)
         run: |
+          # Firestore rules harness: lib/security/firestoreRules.test.js (Task 006)
           firebase emulators:exec \
             --only auth,functions,firestore,storage \
             --project rolekeeper-7ddcc \
-            "cd functions && GOOGLE_APPLICATION_CREDENTIALS= FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 FIREBASE_STORAGE_EMULATOR_HOST=localhost:9199 node --test lib/"
+            "cd functions && GOOGLE_APPLICATION_CREDENTIALS= FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 FIREBASE_STORAGE_EMULATOR_HOST=localhost:9199 node --test lib/security/firestoreRules.test.js lib/"
