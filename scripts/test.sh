@@ -58,6 +58,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+run_firestore_rules_tests() {
+  GOOGLE_APPLICATION_CREDENTIALS= \
+  FIRESTORE_EMULATOR_HOST="localhost:8080" \
+    node --test "$@"
+}
+
+run_functions_emulator_tests() {
+  GOOGLE_APPLICATION_CREDENTIALS= \
+  FIRESTORE_EMULATOR_HOST="localhost:8080" \
+  FIREBASE_AUTH_EMULATOR_HOST="localhost:9099" \
+  FIREBASE_STORAGE_EMULATOR_HOST="localhost:9199" \
+  FUNCTIONS_EMULATOR_HOST="localhost:5001" \
+    node --test "$@"
+}
+
 echo "================================================"
 echo "  RoleKeeper Tests"
 echo "================================================"
@@ -112,14 +127,14 @@ fi
 
 # --- Flutter tests ---
 echo ""
-echo ">>> [1/2] Flutter tests"
+echo ">>> [1/4] Flutter tests"
 cd "$ROOT_DIR"
 flutter test --no-pub
 echo "    Flutter tests: PASSED"
 
-# --- Functions tests ---
+# --- Firestore rules tests ---
 echo ""
-echo ">>> [2/3] Functions tests"
+echo ">>> [2/4] Firestore rules tests"
 cd "$ROOT_DIR/functions"
 # Build TypeScript first, then run Node's built-in test runner.
 # NOTE: `node --test lib/` does NOT recurse — it tries to load lib/index.js
@@ -127,22 +142,30 @@ cd "$ROOT_DIR/functions"
 # node >= 21; the MCP host runs node 18, which treats the glob as a literal
 # path. So expand the glob in bash and pass real files to node.
 npm run build 2>&1
+run_firestore_rules_tests lib/security/firestoreRules.test.js
+echo "    Firestore rules tests: PASSED"
+
+# --- Functions tests ---
+echo ""
+echo ">>> [3/4] Functions tests"
 FUNC_TESTS=( lib/**/*.test.js )
-if [ ${#FUNC_TESTS[@]} -eq 0 ]; then
-  echo "    ERROR: no compiled *.test.js files found under functions/lib/"
+FILTERED_FUNC_TESTS=()
+for test_file in "${FUNC_TESTS[@]}"; do
+  if [ "$test_file" = "lib/security/firestoreRules.test.js" ]; then
+    continue
+  fi
+  FILTERED_FUNC_TESTS+=( "$test_file" )
+done
+if [ ${#FILTERED_FUNC_TESTS[@]} -eq 0 ]; then
+  echo "    ERROR: no compiled *.test.js files found under functions/lib/ (excluding Firestore rules)"
   exit 1
 fi
-GOOGLE_APPLICATION_CREDENTIALS= \
-FIRESTORE_EMULATOR_HOST="localhost:8080" \
-FIREBASE_AUTH_EMULATOR_HOST="localhost:9099" \
-FIREBASE_STORAGE_EMULATOR_HOST="localhost:9199" \
-FUNCTIONS_EMULATOR_HOST="localhost:5001" \
-  node --test "${FUNC_TESTS[@]}"
-echo "    Functions tests: PASSED (${#FUNC_TESTS[@]} files)"
+run_functions_emulator_tests "${FILTERED_FUNC_TESTS[@]}"
+echo "    Functions tests: PASSED (${#FILTERED_FUNC_TESTS[@]} files)"
 
 # --- Scripts tests (TS, pure helpers — no network, no emulator) ---
 echo ""
-echo ">>> [3/3] Scripts tests"
+echo ">>> [4/4] Scripts tests"
 cd "$ROOT_DIR/scripts"
 # Reuse the typescript compiler from functions/ so scripts/ does not need
 # its own node_modules. Compiles scripts/*.ts → scripts/lib/, then runs

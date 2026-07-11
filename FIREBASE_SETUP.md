@@ -175,6 +175,24 @@ flutter run -d chrome   # or your preferred device
 **Note**: To use emulators from Flutter, run with `--dart-define=USE_EMULATORS=true`:
 `flutter run -d chrome --dart-define=USE_EMULATORS=true`. The app will connect to the Auth emulator. Add `FirebaseFirestore.instance.useFirestoreEmulator('localhost', 8080)` in `main.dart` too when using Firestore locally.
 
+### Firestore security rules tests
+
+Automated rules tests live in `functions/src/security/firestoreRules.test.ts` and run against the **Firestore emulator** (port 8080). They are included in `scripts/test.sh` and CI.
+
+With emulators already running:
+
+```bash
+cd functions && npm run build && \
+  GOOGLE_APPLICATION_CREDENTIALS= FIRESTORE_EMULATOR_HOST=localhost:8080 \
+  node --test lib/security/firestoreRules.test.js
+```
+
+Or run the full stack (Flutter, Firestore rules, Functions, scripts):
+
+```bash
+./scripts/test.sh
+```
+
 ---
 
 ## Step 7: Deploy (When Ready)
