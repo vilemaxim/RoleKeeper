@@ -2,6 +2,7 @@
 abstract final class ActiveGameEventType {
   static const deathTimerStarted = 'deathTimerStarted';
   static const deathTimerExpired = 'deathTimerExpired';
+  static const deathTimerQrUnavailable = 'deathTimerQrUnavailable';
   static const medicStoppedDeathTimer = 'medicStoppedDeathTimer';
   static const medicRevivedCharacter = 'medicRevivedCharacter';
   static const medicRevivedCharacterOffline = 'medicRevivedCharacterOffline';

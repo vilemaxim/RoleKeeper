@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,6 +26,7 @@ import '../services/auth_service.dart';
 import '../services/activity_events_service.dart';
 import '../services/character_status_service.dart';
 import '../services/characters_repository.dart';
+import '../services/death_intervention_secrets_service.dart';
 import '../services/death_timer_service.dart';
 import '../services/event_session_repository.dart';
 import '../services/game_context_service.dart';
@@ -235,7 +237,43 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
     await _checkDeathTimerOnLogin();
+    await _prefetchDeathInterventionSecrets();
     await _syncLocationPings();
+  }
+
+  /// Eagerly caches per-event TOTP + QR signing secrets while online so
+  /// death timer / offline intervention work later without a network round-trip.
+  Future<void> _prefetchDeathInterventionSecrets() async {
+    final secretsService = DeathInterventionSecretsService();
+    try {
+      final secrets = await secretsService.fetchAndCacheSecrets();
+      if (secrets != null) return;
+      final report = reportAppError(
+        'HomeScreen.deathSecretsPrefetch',
+        Exception('Death intervention secrets unavailable'),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(report.userMessage)),
+      );
+    } catch (e, st) {
+      final cached = await secretsService.getCachedSecrets();
+      final likelyOffline = e is FirebaseFunctionsException &&
+          (e.code == 'unavailable' || e.code == 'deadline-exceeded');
+      if (likelyOffline && cached != null) {
+        // Warm cache offline — fine; refresh can wait until connectivity returns.
+        return;
+      }
+      final report = reportAppError(
+        'HomeScreen.deathSecretsPrefetch',
+        e,
+        st,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(report.userMessage)),
+      );
+    }
   }
 
   /// Refreshes registration/LM status without blocking the first paint after cache hit.

@@ -114,6 +114,28 @@ String buildDeathMedicQrPayload({
   return '$_v2MedicPrefix$shortId:$fallenPlayerId:$activityEventId:$hmacHex';
 }
 
+/// Returns true when [signingSecret] can produce a verifiable v2 medic QR.
+bool canProduceSignedDeathMedicQr({
+  required String? signingSecret,
+  required String shortId,
+  required String fallenPlayerId,
+  String activityEventId = 'preflight',
+}) {
+  if (signingSecret == null || signingSecret.isEmpty) return false;
+  try {
+    final raw = buildDeathMedicQrPayload(
+      shortId: shortId,
+      fallenPlayerId: fallenPlayerId,
+      activityEventId: activityEventId,
+      signingSecret: signingSecret,
+    );
+    return raw.isNotEmpty &&
+        verifyDeathInterventionQr(raw, signingSecret: signingSecret);
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Builds the v2 HMAC-signed revival-confirmation QR payload.
 String buildDeathRevivalConfirmQrPayload({
   required String shortId,

@@ -43,6 +43,7 @@ abstract final class ActiveEventsUtils {
     String? characterId,
     String? relatedCharacterId,
     String? chainActivityEventId,
+    String? reason,
     ActivityEventLocation? location,
   }) {
     return {
@@ -55,6 +56,7 @@ abstract final class ActiveEventsUtils {
         'relatedCharacterId': relatedCharacterId,
       if (chainActivityEventId != null && chainActivityEventId.isNotEmpty)
         'chainActivityEventId': chainActivityEventId,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
       if (location != null) 'location': location.toMap(),
     };
   }
@@ -105,6 +107,27 @@ abstract final class ActiveEventsUtils {
         playerId: playerId,
         characterId: characterId,
         chainActivityEventId: chainActivityEventId,
+        location: loc,
+      ),
+    );
+  }
+
+  /// Logged when a new death timer cannot start because a signed medic QR
+  /// cannot be produced (e.g. missing cached signing secret).
+  static Future<String> recordDeathTimerQrUnavailable({
+    required String gameId,
+    required String playerId,
+    String? characterId,
+    required String reason,
+  }) async {
+    final loc = await captureLocationForEvent();
+    return _invokeCreateActiveGameEvent(
+      _callableBody(
+        gameId: gameId,
+        type: ActiveGameEventType.deathTimerQrUnavailable,
+        playerId: playerId,
+        characterId: characterId,
+        reason: reason,
         location: loc,
       ),
     );

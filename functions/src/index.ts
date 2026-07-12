@@ -54,6 +54,7 @@ const REGION = "us-central1";
 const ALLOWED_ACTIVE_EVENT_TYPES = new Set([
   "deathTimerStarted",
   "deathTimerExpired",
+  "deathTimerQrUnavailable",
   "medicStoppedDeathTimer",
   "medicRevivedCharacter",
   "medicRevivedCharacterOffline",
@@ -101,6 +102,7 @@ export const createActiveGameEvent = onCall(
     const characterId = body?.characterId as string | undefined;
     const relatedCharacterId = body?.relatedCharacterId as string | undefined;
     const chainActivityEventId = body?.chainActivityEventId as string | undefined;
+    const reason = body?.reason as string | undefined;
 
     if (!tenant) {
       throw new HttpsError(
@@ -160,6 +162,9 @@ export const createActiveGameEvent = onCall(
     }
     if (chainActivityEventId && chainActivityEventId.length > 0) {
       payload.chainActivityEventId = chainActivityEventId;
+    }
+    if (reason && typeof reason === "string" && reason.length > 0) {
+      payload.reason = reason.slice(0, 200);
     }
     const loc = sanitizeLocation(body?.location);
     if (loc) {

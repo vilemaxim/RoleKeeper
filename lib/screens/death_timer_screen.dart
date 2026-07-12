@@ -12,6 +12,7 @@ import '../services/death_intervention_secrets_service.dart';
 import '../services/death_timer_service.dart';
 import '../services/rules_repository.dart';
 import '../utils/death_qr_parser.dart';
+import '../utils/error_reporting.dart';
 import 'death_offline_intervention_screen.dart';
 
 String _capitalize(String s) {
@@ -78,6 +79,24 @@ class _DeathTimerScreenState extends State<DeathTimerScreen> {
       return;
     }
 
+    // New start with intervention: require a usable signing secret so a medic
+    // QR can be produced. Do not start the timer with a soft placeholder.
+    if (rules.interventionEnabled) {
+      final canBuildQr = canProduceSignedDeathMedicQr(
+        signingSecret: _qrSigningSecret,
+        shortId: widget.character.shortId,
+        fallenPlayerId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+      );
+      if (!canBuildQr) {
+        await _failNewStartQrUnavailable(
+          characterId:
+              widget.character.id.isNotEmpty ? widget.character.id : null,
+          reason: 'missing cached signing secret',
+        );
+        return;
+      }
+    }
+
     String? activityEventId;
     try {
       activityEventId = await _eventsService.recordDeathCountStarted(
@@ -106,6 +125,32 @@ class _DeathTimerScreenState extends State<DeathTimerScreen> {
     }
     if (!mounted) return;
     setState(() => _initialized = true);
+  }
+
+  Future<void> _failNewStartQrUnavailable({
+    String? characterId,
+    required String reason,
+  }) async {
+    final error = StateError(
+      'Cannot start death timer: medic QR signing secret unavailable',
+    );
+    final report = reportAppError(
+      'DeathTimerScreen.deathTimerQrUnavailable',
+      error,
+    );
+    try {
+      await _eventsService.recordDeathTimerQrUnavailable(
+        characterId: characterId,
+        reason: reason,
+      );
+    } catch (_) {
+      // Best-effort master log; terminal + UI still surface the failure.
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(report.userMessage)),
+    );
+    Navigator.of(context).pop();
   }
 
   void _onMedicScannedFromQR(String medicPlayerId) {
