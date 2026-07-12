@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'screens/sign_in_screen.dart';
 import 'services/auth_service.dart';
+import 'utils/error_reporting.dart';
 import 'widgets/signed_in_gate.dart';
 
 /// Routes between sign-in and home based on auth state.
@@ -25,11 +26,16 @@ class _AuthGateState extends State<AuthGate> {
       stream: _auth.authStateChanges,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
+          final report = reportAppError(
+            'AuthGate.authState',
+            snapshot.error!,
+            snapshot.stackTrace,
+          );
           return Scaffold(
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text('Auth error: ${snapshot.error}'),
+                child: Text(report.userMessage, textAlign: TextAlign.center),
               ),
             ),
           );

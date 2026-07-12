@@ -5,6 +5,7 @@ import '../screens/home_screen.dart';
 import '../screens/larp_picker_screen.dart';
 import '../services/game_context_service.dart';
 import '../services/user_profile_service.dart';
+import '../utils/error_reporting.dart';
 
 class _SignedInRoute {
   const _SignedInRoute({required this.showPicker});
@@ -65,6 +66,11 @@ class _SignedInGateState extends State<SignedInGate> {
           );
         }
         if (snapshot.hasError) {
+          final report = reportAppError(
+            'SignedInGate.route',
+            snapshot.error!,
+            snapshot.stackTrace,
+          );
           return Scaffold(
             appBar: AppBar(title: const Text('RoleKeeper')),
             body: Center(
@@ -74,7 +80,7 @@ class _SignedInGateState extends State<SignedInGate> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Could not load your profile (${snapshot.error})',
+                      report.userMessage,
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
