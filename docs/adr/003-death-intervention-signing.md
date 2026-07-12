@@ -1,7 +1,7 @@
 # ADR 003: Death Intervention Signing and TOTP Secrets
 
 ## Status
-Proposed — required before Task 004 implementation
+Accepted — Task 004 implemented per-event secrets; Task 017 requires eager prefetch
 
 ## Context
 Death intervention has two attack surfaces:
@@ -18,16 +18,21 @@ still allows a malicious member to trick a legitimate medic's client into
 processing a fake scan before rules are hit, and offline TOTP bypasses server
 entirely.
 
+Field constraint: players often lose connectivity during play. Secrets must
+already be on the device before death timer / offline intervention is needed.
+Fetch-at-need (only when opening the death timer) breaks that use case.
+
 ## Decision
 
 ### Per-event TOTP secret (H3)
 - Cloud Function (or existing callable) generates a random 32-byte secret per
   `games/{instanceId}/events/{eventSlug}` stored in a server-writable doc
   (e.g. `eventSession/config` field or `rules/death` subdoc).
-- Flutter fetches secret when online; caches in `flutter_secure_storage` keyed
-  by `tenantKey`.
-- Offline: use cached secret only. If never fetched, offline intervention
-  disabled with clear UI message.
+- Flutter **eagerly** fetches secrets on LARP/home bootstrap while online and
+  caches them in `flutter_secure_storage` keyed by `tenantKey`.
+- Offline: use cached secret only. If never fetched, death timer must **not**
+  start when a medic QR is required; offline intervention stays disabled with
+  a clear UI message. Failures are logged (terminal + master + character logs).
 - Rotate secret only on explicit organizer action (out of scope for Task 004).
 
 ### HMAC-signed QR payloads (H5)
@@ -48,16 +53,27 @@ entirely.
 - If product later adds dedicated `medic` role, extend rules helper; do not
   allow plain `player` to create claims.
 
+### Abuse detection (product tradeoff)
+- Per-event secrets on member devices are intentional so offline play works.
+- Unauthorized use of an extracted seed is mitigated by logging healing /
+  intervention events; when any device syncs, non-medic or not-nearby heals
+  can be flagged in the master log.
+
 ## Consequences
-- Requires online connectivity at least once per event for offline TOTP to work.
+- Requires online connectivity at least once per LARP session load (bootstrap)
+  so the cache is warm before the field goes offline.
 - Existing printed v1 QRs become invalid after cutover — acceptable pre-production.
-- Secret distribution adds one callable and one Firestore read on event join/live.
+- Secret distribution: callable on join/home load + secure local cache; death
+  timer hard-fails if QR cannot be produced (Task 017).
 
 ## Alternatives considered
 - **Asymmetric signing (RSA):** heavier QR payload; rejected for scan reliability.
 - **Time-limited JWT in QR:** requires clock sync and longer payload; HMAC sufficient.
 - **Keep global TOTP seed:** rejected — trivial forgery.
+- **Fetch secrets only when starting death timer:** rejected — fails when the
+  player is already offline at the moment of need.
 
 ## References
-- Task 004: `docs/tasks/ready/004-coder.md`
+- Task 004: `docs/tasks/done/004-coder.md` (implementation)
+- Task 017: `docs/tasks/ready/017-coder.md` (eager prefetch + QR hard-fail)
 - Security findings H3, H4, H5
