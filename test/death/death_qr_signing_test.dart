@@ -72,6 +72,33 @@ void main() {
       );
     });
 
+    test('canProduceSignedDeathMedicQr accepts usable secret and rejects empty', () {
+      expect(
+        canProduceSignedDeathMedicQr(
+          signingSecret: 'event-signing-secret',
+          shortId: 'A1B',
+          fallenPlayerId: 'player-uid-1',
+        ),
+        isTrue,
+      );
+      expect(
+        canProduceSignedDeathMedicQr(
+          signingSecret: null,
+          shortId: 'A1B',
+          fallenPlayerId: 'player-uid-1',
+        ),
+        isFalse,
+      );
+      expect(
+        canProduceSignedDeathMedicQr(
+          signingSecret: '',
+          shortId: 'A1B',
+          fallenPlayerId: 'player-uid-1',
+        ),
+        isFalse,
+      );
+    });
+
     test('example v2 QR fails verification without correct secret', () {
       expect(
         verifyDeathInterventionQr(

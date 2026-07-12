@@ -1,13 +1,17 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models/character.dart';
 import '../models/game_role.dart';
 import '../services/active_character_preference_service.dart';
+import '../services/activity_events_service.dart';
 import '../services/characters_repository.dart';
+import '../services/death_intervention_secrets_service.dart';
 import '../services/death_timer_service.dart';
 import '../services/game_context_service.dart';
 import '../services/game_membership_service.dart';
 import '../services/rules_repository.dart';
+import '../utils/death_qr_parser.dart';
 import '../utils/error_reporting.dart';
 import 'death_timer_screen.dart';
 
@@ -45,6 +49,7 @@ class _DeathCountConfirmScreenState extends State<DeathCountConfirmScreen> {
 
   bool _playtest = false;
   String _interventionRoleName = 'medic';
+  bool _interventionEnabled = false;
   bool _loading = true;
   Character? _activeCharacter;
   GameRole _gameRole = GameRole.player;
@@ -56,6 +61,8 @@ class _DeathCountConfirmScreenState extends State<DeathCountConfirmScreen> {
       widget.charactersRepository ?? CharactersRepository();
   late final GameMembershipService _membership =
       widget.membershipService ?? GameMembershipService();
+  final _secretsService = DeathInterventionSecretsService();
+  final _eventsService = ActivityEventsService();
 
   @override
   void initState() {
@@ -85,6 +92,7 @@ class _DeathCountConfirmScreenState extends State<DeathCountConfirmScreen> {
           active == null && !role.canConfigureDeathRules;
       setState(() {
         _interventionRoleName = rules.interventionRoleName;
+        _interventionEnabled = rules.interventionEnabled;
         _gameRole = role;
         _activeCharacter = active;
         _loading = false;
@@ -246,8 +254,12 @@ class _DeathCountConfirmScreenState extends State<DeathCountConfirmScreen> {
     _openTimer(context, t.character);
   }
 
-  void _confirm(BuildContext context) {
+  Future<void> _confirm(BuildContext context) async {
     if (_playtest && _gameRole.canConfigureDeathRules) {
+      final ok = await _preflightMedicQrOrFail(
+        characterId: null,
+      );
+      if (!ok || !context.mounted) return;
       _openTimer(context, _playtestCharacter);
       return;
     }
@@ -259,6 +271,50 @@ class _DeathCountConfirmScreenState extends State<DeathCountConfirmScreen> {
       Navigator.pop(context);
       return;
     }
+    final ok = await _preflightMedicQrOrFail(
+      characterId: character.id.isNotEmpty ? character.id : null,
+    );
+    if (!ok || !context.mounted) return;
     _openTimer(context, character);
+  }
+
+  /// When intervention is enabled, require a cached signing secret that can
+  /// produce a medic QR before navigating into a new death timer.
+  Future<bool> _preflightMedicQrOrFail({String? characterId}) async {
+    if (!_interventionEnabled) return true;
+    String? signingSecret;
+    try {
+      final secrets = await _secretsService.getCachedSecrets();
+      signingSecret = secrets?.qrSigningSecret;
+    } catch (_) {
+      signingSecret = null;
+    }
+    final usable = canProduceSignedDeathMedicQr(
+      signingSecret: signingSecret,
+      shortId: _activeCharacter?.shortId ?? '000',
+      fallenPlayerId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+    );
+    if (usable) return true;
+
+    final error = StateError(
+      'Cannot start death timer: medic QR signing secret unavailable',
+    );
+    final report = reportAppError(
+      'DeathCountConfirmScreen.deathTimerQrUnavailable',
+      error,
+    );
+    try {
+      await _eventsService.recordDeathTimerQrUnavailable(
+        characterId: characterId,
+        reason: 'missing cached signing secret',
+      );
+    } catch (_) {
+      // Best-effort master log; terminal + UI still surface the failure.
+    }
+    if (!mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(report.userMessage)),
+    );
+    return false;
   }
 }

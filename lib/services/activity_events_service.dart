@@ -72,6 +72,20 @@ class ActivityEventsService {
     );
   }
 
+  Future<String> recordDeathTimerQrUnavailable({
+    String? characterId,
+    required String reason,
+  }) async {
+    final uid = _userId;
+    if (uid == null) throw StateError('Not authenticated');
+    return ActiveEventsUtils.recordDeathTimerQrUnavailable(
+      gameId: _tenantKey,
+      playerId: uid,
+      characterId: characterId,
+      reason: reason,
+    );
+  }
+
   Future<void> recordMedicStoppedDeathTimer({
     required String injuredPlayerId,
     required String medicPlayerId,
