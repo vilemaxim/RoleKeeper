@@ -1,3 +1,4 @@
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,13 @@ import 'widgets/death_timer_global_listener.dart';
 final GlobalKey<NavigatorState> roleKeeperNavigatorKey =
     GlobalKey<NavigatorState>();
 
+/// reCAPTCHA Enterprise site key from Firebase Console → App Check → Web app.
+/// Pass at build time: `--dart-define=RECAPTCHA_ENTERPRISE_SITE_KEY=...`
+const _recaptchaEnterpriseSiteKey = String.fromEnvironment(
+  'RECAPTCHA_ENTERPRISE_SITE_KEY',
+  defaultValue: '',
+);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Web builds (including in mobile browsers) must use web config with authDomain
@@ -20,6 +28,15 @@ void main() async {
       ? DefaultFirebaseOptions.web
       : DefaultFirebaseOptions.currentPlatform;
   await Firebase.initializeApp(options: options);
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: kDebugMode
+        ? AndroidProvider.debug
+        : AndroidProvider.playIntegrity,
+    appleProvider: kDebugMode
+        ? AppleProvider.debug
+        : AppleProvider.appAttest,
+    webProvider: ReCaptchaEnterpriseProvider(_recaptchaEnterpriseSiteKey),
+  );
 
   // Optional: Use emulators for local dev. Run with:
   //   flutter run --dart-define=USE_EMULATORS=true

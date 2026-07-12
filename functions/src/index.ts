@@ -51,6 +51,9 @@ admin.initializeApp();
 
 const REGION = "us-central1";
 
+/** Auth-backed callables enforce App Check; HA API-key callables use `{ region: REGION }` only. */
+const APP_CHECK_CALLABLE = { region: REGION, enforceAppCheck: true as const };
+
 const ALLOWED_ACTIVE_EVENT_TYPES = new Set([
   "deathTimerStarted",
   "deathTimerExpired",
@@ -82,7 +85,7 @@ function sanitizeLocation(
  * Creates `games/{instanceId}/events/{eventSlug}/activeEvents/{eventId}`.
  */
 export const createActiveGameEvent = onCall(
-  { region: REGION },
+  APP_CHECK_CALLABLE,
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Authentication required");
@@ -270,7 +273,7 @@ function getGoogleCloudProjectId(): string {
 }
 
 export const saveLarpManagerIntegrationConfig = onCall(
-  { region: REGION, memory: "512MiB", timeoutSeconds: 120 },
+  { ...APP_CHECK_CALLABLE, memory: "512MiB", timeoutSeconds: 120 },
   async (request) => {
     try {
       return await runSaveLarpManagerIntegrationConfig(
@@ -377,7 +380,7 @@ export const larpManagerSyncScheduled = onSchedule(
 
 export const runLarpManagerSyncCallable = onCall(
   {
-    region: REGION,
+    ...APP_CHECK_CALLABLE,
     memory: "512MiB",
     timeoutSeconds: 300,
   },
@@ -445,7 +448,7 @@ export const runLarpManagerSyncCallable = onCall(
  */
 export const syncMyLarpManagerCharacterCallable = onCall(
   {
-    region: REGION,
+    ...APP_CHECK_CALLABLE,
     memory: "512MiB",
     timeoutSeconds: 60,
   },
@@ -467,7 +470,7 @@ export const syncMyLarpManagerCharacterCallable = onCall(
  */
 export const checkLarpManagerRegistrationCallable = onCall(
   {
-    region: REGION,
+    ...APP_CHECK_CALLABLE,
     memory: "512MiB",
     timeoutSeconds: 120,
   },
@@ -540,7 +543,7 @@ export const checkLarpManagerRegistrationCallable = onCall(
 
 /** Records a GPS ping for an opted-in player during a live event. */
 export const recordLocationPing = onCall(
-  { region: REGION },
+  APP_CHECK_CALLABLE,
   async (request) =>
     runRecordLocationPing(
       { db: admin.firestore() },
@@ -560,7 +563,7 @@ export const getLatestPlayerLocations = onCall(
 
 /** Staff+ configuration for Home Assistant integration (API key generation). */
 export const configureHomeAssistantIntegration = onCall(
-  { region: REGION },
+  APP_CHECK_CALLABLE,
   async (request) =>
     runConfigureHomeAssistantIntegration(
       { db: admin.firestore() },
@@ -570,7 +573,7 @@ export const configureHomeAssistantIntegration = onCall(
 
 /** Per-event TOTP and death QR signing secrets for authenticated members. */
 export const getDeathInterventionSecrets = onCall(
-  { region: REGION },
+  APP_CHECK_CALLABLE,
   async (request) =>
     runGetDeathInterventionSecrets(
       { db: admin.firestore() },

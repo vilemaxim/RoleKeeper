@@ -160,6 +160,59 @@ cd functions && npm test
 
 ---
 
+## Step 5b: Firebase App Check
+
+App Check reduces abuse from non-app clients by attaching attestation tokens to
+Firestore, Storage, and callable requests. See
+[docs/adr/005-firebase-app-check-walkthrough.md](docs/adr/005-firebase-app-check-walkthrough.md)
+for the full rollout checklist.
+
+### Console setup (human steps)
+
+1. Firebase Console → **Build → App Check** → register each app:
+   - **Android:** Play Integrity (production)
+   - **iOS:** App Attest (DeviceCheck fallback optional)
+   - **Web:** reCAPTCHA Enterprise (create site key in Google Cloud Console)
+2. **Do not enforce yet** — deploy the client first and confirm tokens appear in metrics.
+3. After verification, enforce App Check on **Firestore**, **Storage**, and **Cloud Functions** in Console.
+
+### Local development (debug token)
+
+Debug builds use the App Check **debug provider** (`AndroidProvider.debug` /
+`AppleProvider.debug` in `lib/main.dart`).
+
+1. Run the app once in debug mode (`flutter run`).
+2. Copy the **App Check debug token** printed in the console log.
+3. Firebase Console → **App Check → Manage debug tokens** → add the token for your device/emulator.
+4. Re-run the app; Firestore and callable requests should succeed while enforcement is still off.
+
+Each developer machine and CI runner needs its own debug token registered (or a
+shared CI token stored as a GitHub Actions secret if you pre-generate one).
+
+### Web builds
+
+Pass the reCAPTCHA Enterprise site key at build time:
+
+```bash
+flutter build web --dart-define=RECAPTCHA_ENTERPRISE_SITE_KEY=your-site-key
+```
+
+### Emulators and CI
+
+- **Emulators:** App Check is typically bypassed or satisfied by the debug provider.
+  `./scripts/test.sh` and CI emulator runs do not require Play Integrity tokens.
+- **CI:** Flutter unit tests do not call production Firebase. If you add integration
+  tests against a real project later, register a CI debug token in Console and
+  store it in a GitHub Actions secret.
+
+### Callable exceptions
+
+`getLatestPlayerLocations` (Home Assistant API-key auth) intentionally does **not**
+enforce App Check. All other callables in `functions/src/index.ts` set
+`enforceAppCheck: true`.
+
+---
+
 ## Step 6: Run with Emulators (Local Development)
 
 To develop locally without hitting production:
