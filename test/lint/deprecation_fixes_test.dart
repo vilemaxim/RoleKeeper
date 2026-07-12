@@ -51,50 +51,29 @@ void main() {
     });
   });
 
-  group('Task 001 — death_count_confirm_screen.dart RadioGroup migration', () {
+  group('Task 001 / 016 — death_count_confirm_screen.dart character picker', () {
     late final String src;
 
     setUpAll(() {
       src = File('lib/screens/death_count_confirm_screen.dart').readAsStringSync();
     });
 
-    test('uses RadioGroup ancestor instead of per-tile groupValue/onChanged', () {
+    test('no longer uses RadioGroup / RadioListTile (selection moved to home)', () {
+      // Task 001 migrated radios to RadioGroup; Task 016 removed the player
+      // character picker entirely in favor of home active-character selection.
       expect(
         src.contains('RadioGroup'),
-        isTrue,
-        reason:
-            'death_count_confirm_screen.dart must wrap its RadioListTiles in '
-            'a RadioGroup<Character> per the post-3.32 Material API.',
-      );
-    });
-
-    test('RadioListTile no longer passes groupValue', () {
-      // Match `RadioListTile<...>(` and any args up to the closing `)`,
-      // then assert no `groupValue:` keyword appears inside that span.
-      final radioTilePattern = RegExp(
-        r'RadioListTile<[^>]*>\([^)]*groupValue:',
-        dotAll: true,
-      );
-      expect(
-        radioTilePattern.hasMatch(src),
         isFalse,
         reason:
-            'After RadioGroup migration, RadioListTile must not declare '
-            'groupValue: directly.',
-      );
-    });
-
-    test('RadioListTile no longer passes onChanged', () {
-      final radioTilePattern = RegExp(
-        r'RadioListTile<[^>]*>\([^)]*onChanged:',
-        dotAll: true,
+            'death_count_confirm_screen.dart must not present a character '
+            'RadioGroup; active character is chosen on home (Task 016).',
       );
       expect(
-        radioTilePattern.hasMatch(src),
+        src.contains('RadioListTile'),
         isFalse,
         reason:
-            'After RadioGroup migration, RadioListTile must not declare '
-            'onChanged: directly.',
+            'death_count_confirm_screen.dart must not present character '
+            'RadioListTiles; active character is chosen on home (Task 016).',
       );
     });
   });

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/death_rules.dart';
+import '../services/active_character_preference_service.dart';
+import '../services/game_context_service.dart';
 import '../services/rules_repository.dart';
 import 'death_count_confirm_screen.dart';
 import 'medic_scan_screen.dart';
@@ -12,7 +14,12 @@ String _capitalize(String s) {
 
 /// List of available rules aids.
 class RulesAidsScreen extends StatefulWidget {
-  const RulesAidsScreen({super.key});
+  const RulesAidsScreen({
+    super.key,
+    this.activeCharacterPrefs,
+  });
+
+  final ActiveCharacterPreferenceService? activeCharacterPrefs;
 
   @override
   State<RulesAidsScreen> createState() => _RulesAidsScreenState();
@@ -21,18 +28,27 @@ class RulesAidsScreen extends StatefulWidget {
 class _RulesAidsScreenState extends State<RulesAidsScreen> {
   bool _loading = true;
   DeathRules _rules = DeathRules.defaultRules;
+  String? _activeCharacterId;
+  late final ActiveCharacterPreferenceService _activeCharacterPrefs =
+      widget.activeCharacterPrefs ?? ActiveCharacterPreferenceService();
+
+  static const _noCharacterMessage = 'Select or create a character first';
 
   @override
   void initState() {
     super.initState();
-    _loadRules();
+    _load();
   }
 
-  Future<void> _loadRules() async {
+  Future<void> _load() async {
     final rules = await RulesRepository().getDeathRules();
+    final activeId = await _activeCharacterPrefs.getActiveCharacterId(
+      GameContextService.instance.currentTenantKey,
+    );
     if (mounted) {
       setState(() {
         _rules = rules;
+        _activeCharacterId = activeId;
         _loading = false;
       });
     }
@@ -40,6 +56,9 @@ class _RulesAidsScreenState extends State<RulesAidsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final hasActiveCharacter =
+        _activeCharacterId != null && _activeCharacterId!.isNotEmpty;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Rules Aids'),
@@ -50,12 +69,7 @@ class _RulesAidsScreenState extends State<RulesAidsScreen> {
               padding: const EdgeInsets.all(24),
               children: [
                 if (_rules.enabled) ...[
-                  _AidTile(
-                    title: 'Death Counter',
-                    subtitle: 'Start the death timer when your character is downed',
-                    icon: Icons.timer,
-                    onTap: () => _openDeathCounter(context),
-                  ),
+                  _deathCounterTile(context, hasActiveCharacter),
                   if (_rules.interventionEnabled) const SizedBox(height: 12),
                 ],
                 if (_rules.enabled && _rules.interventionEnabled)
@@ -75,6 +89,19 @@ class _RulesAidsScreenState extends State<RulesAidsScreen> {
               ],
             ),
     );
+  }
+
+  Widget _deathCounterTile(BuildContext context, bool hasActiveCharacter) {
+    final tile = _AidTile(
+      title: 'Death Counter',
+      subtitle: hasActiveCharacter
+          ? 'Start the death timer when your character is downed'
+          : _noCharacterMessage,
+      icon: Icons.timer,
+      onTap: hasActiveCharacter ? () => _openDeathCounter(context) : null,
+    );
+    if (hasActiveCharacter) return tile;
+    return Tooltip(message: _noCharacterMessage, child: tile);
   }
 
   void _openDeathCounter(BuildContext context) {

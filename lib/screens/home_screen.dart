@@ -15,13 +15,16 @@ import '../screens/larp_picker_screen.dart';
 import '../screens/player_presence_settings_section.dart';
 import '../screens/rules_aids_screen.dart';
 import '../screens/rules_screen.dart';
+import '../models/character.dart';
 import '../models/death_rules.dart';
 import '../models/event_session.dart';
 import '../models/game_role.dart';
 import '../models/member_presence.dart';
+import '../services/active_character_preference_service.dart';
 import '../services/auth_service.dart';
 import '../services/activity_events_service.dart';
 import '../services/character_status_service.dart';
+import '../services/characters_repository.dart';
 import '../services/death_timer_service.dart';
 import '../services/event_session_repository.dart';
 import '../services/game_context_service.dart';
@@ -59,8 +62,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _locationRulesRepo = LocationTrackingRulesRepository();
   final _eventSessionRepo = EventSessionRepository();
   final _presenceRepo = MemberPresenceRepository();
+  final _charactersRepo = CharactersRepository();
+  final _activeCharacterPrefs = ActiveCharacterPreferenceService();
   StreamSubscription? _eventSessionSub;
   StreamSubscription? _locationRulesSub;
+  StreamSubscription? _charactersSub;
   GameRole _gameRole = GameRole.player;
   LmIntegrationEvaluation? _lmEvaluation;
   bool _bootstrapDone = false;
@@ -76,6 +82,8 @@ class _HomeScreenState extends State<HomeScreen> {
   MemberPresence _presence = MemberPresence.defaultPresence;
   bool _locationOptInPromptDismissed = false;
   EventSession _lastEventSession = EventSession.defaultSession;
+  List<Character> _ownedCharacters = const [];
+  String? _activeCharacterId;
 
   @override
   void initState() {
@@ -96,6 +104,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       unawaited(_syncLocationPings());
     });
+    _charactersSub = _charactersRepo.watchCharacters().listen((chars) {
+      unawaited(_onOwnedCharactersChanged(chars));
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
   }
 
@@ -103,8 +114,70 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _eventSessionSub?.cancel();
     _locationRulesSub?.cancel();
+    _charactersSub?.cancel();
     _locationPingService.dispose();
     super.dispose();
+  }
+
+  Future<void> _onOwnedCharactersChanged(List<Character> chars) async {
+    final tenantKey = GameContextService.instance.currentTenantKey;
+    final active = await _activeCharacterPrefs.reconcileOwnedCharacters(
+      tenantKey,
+      chars.map((c) => c.id).toList(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _ownedCharacters = chars;
+      _activeCharacterId = active;
+    });
+  }
+
+  Character? get _activeCharacter {
+    final id = _activeCharacterId;
+    if (id == null) return null;
+    for (final c in _ownedCharacters) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  Future<void> _pickActiveCharacter() async {
+    if (!ActiveCharacterSelection.showSwitcher(_ownedCharacters.length)) {
+      return;
+    }
+    final selected = await showModalBottomSheet<Character>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Playing as',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              for (final c in _ownedCharacters)
+                ListTile(
+                  title: Text(c.name),
+                  subtitle: Text('ID: ${c.shortId}'),
+                  trailing: c.id == _activeCharacterId
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () => Navigator.pop(context, c),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected == null || !mounted) return;
+    final tenantKey = GameContextService.instance.currentTenantKey;
+    await _activeCharacterPrefs.setActiveCharacterId(tenantKey, selected.id);
+    if (!mounted) return;
+    setState(() => _activeCharacterId = selected.id);
   }
 
   Future<void> _syncLocationPings() async {
@@ -480,6 +553,15 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('RoleKeeper'),
         actions: [
+          if (ActiveCharacterSelection.showSwitcher(_ownedCharacters.length) &&
+              _activeCharacter != null)
+            TextButton(
+              onPressed: _pickActiveCharacter,
+              child: Text(
+                'Playing as: ${_activeCharacter!.name} ▾',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 4),
             child: PopupMenuButton<String>(
