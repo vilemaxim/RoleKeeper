@@ -1,7 +1,8 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/death_rules.dart';
 import '../models/game_tenant_ref.dart';
@@ -12,14 +13,14 @@ import 'game_context_service.dart';
 class RulesRepository {
   RulesRepository({
     FirebaseFirestore? firestore,
-    SharedPreferences? prefs,
+    FlutterSecureStorage? secureStorage,
     GameTenantRef? tenant,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _prefs = prefs,
+        _secureStorage = secureStorage ?? const FlutterSecureStorage(),
         _tenant = tenant ?? GameContextService.instance.currentTenant;
 
   final FirebaseFirestore _firestore;
-  final SharedPreferences? _prefs;
+  final FlutterSecureStorage _secureStorage;
   final GameTenantRef? _tenant;
 
   GameTenantRef get _resolvedTenant {
@@ -28,7 +29,11 @@ class RulesRepository {
     return t;
   }
 
-  String get _cacheKey => 'rules_death_cached_${_resolvedTenant.tenantKey}';
+  @visibleForTesting
+  static String storageKeyForTenant(String tenantKey) =>
+      'rules_death_cached_$tenantKey';
+
+  String get _cacheKey => storageKeyForTenant(_resolvedTenant.tenantKey);
 
   DocumentReference<Map<String, dynamic>> get _deathRulesRef =>
       GameFirestorePaths.deathRules(_firestore, _resolvedTenant);
@@ -48,17 +53,9 @@ class RulesRepository {
   }
 
   Future<DeathRules> _getCachedRules() async {
-    SharedPreferences? prefs = _prefs;
-    if (prefs == null) {
-      try {
-        prefs = await SharedPreferences.getInstance();
-      } catch (_) {
-        return DeathRules.defaultRules;
-      }
-    }
-    final json = prefs.getString(_cacheKey);
-    if (json == null) return DeathRules.defaultRules;
     try {
+      final json = await _secureStorage.read(key: _cacheKey);
+      if (json == null) return DeathRules.defaultRules;
       return DeathRules.fromMap(
         jsonDecode(json) as Map<String, dynamic>,
       );
@@ -68,15 +65,14 @@ class RulesRepository {
   }
 
   Future<void> _cacheRules(DeathRules rules) async {
-    SharedPreferences? prefs = _prefs;
-    if (prefs == null) {
-      try {
-        prefs = await SharedPreferences.getInstance();
-      } catch (_) {
-        return;
-      }
+    try {
+      await _secureStorage.write(
+        key: _cacheKey,
+        value: jsonEncode(rules.toMap()),
+      );
+    } catch (_) {
+      // Offline cache is best-effort.
     }
-    await prefs.setString(_cacheKey, jsonEncode(rules.toMap()));
   }
 
   Future<void> saveDeathRules(DeathRules rules) async {
