@@ -57,8 +57,9 @@ jobs:
       - name: Deploy Storage rules
         run: firebase deploy --only storage --project rolekeeper-7ddcc
 
+      # --force deletes remote-only functions so CI can complete after intentional removals
       - name: Deploy Functions
-        run: firebase deploy --only functions --project rolekeeper-7ddcc
+        run: firebase deploy --only functions --force --project rolekeeper-7ddcc
 
       - name: Deploy Flutter web to Hosting
         run: firebase deploy --only hosting --project rolekeeper-7ddcc
