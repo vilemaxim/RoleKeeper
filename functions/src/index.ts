@@ -46,6 +46,14 @@ import {
   runGetDeathInterventionSecrets,
   type DeathInterventionSecretsBody,
 } from "./deathInterventionSecrets";
+import {
+  runRegisterNfcHuntTag,
+  type RegisterNfcHuntTagBody,
+} from "./nfcHunt/registerNfcHuntTag";
+import {
+  runRecordNfcHuntScan,
+  type RecordNfcHuntScanBody,
+} from "./nfcHunt/recordNfcHuntScan";
 
 admin.initializeApp();
 
@@ -580,5 +588,25 @@ export const getDeathInterventionSecrets = onCall(
     runGetDeathInterventionSecrets(
       { db: admin.firestore() },
       request as CallableRequest<DeathInterventionSecretsBody>
+    )
+);
+
+/** Organizer or hunt placer upserts a scavenger-hunt tag (ADR 007). */
+export const registerNfcHuntTag = onCall(
+  { region: REGION },
+  async (request) =>
+    runRegisterNfcHuntTag(
+      { db: admin.firestore() },
+      request as CallableRequest<RegisterNfcHuntTagBody>
+    )
+);
+
+/** Records a character-credited scavenger-hunt scan (ADR 007). */
+export const recordNfcHuntScan = onCall(
+  { region: REGION },
+  async (request) =>
+    runRecordNfcHuntScan(
+      { db: admin.firestore() },
+      request as CallableRequest<RecordNfcHuntScanBody>
     )
 );

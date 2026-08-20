@@ -394,6 +394,187 @@ test("authenticated user cannot read itemTransfers", async () => {
   await assertFails(getDoc(doc(authDb(PLAYER_UID), "itemTransfers/transfer-001")));
 });
 
+// --- Task 002 / ADR 007: nfcHunts ---
+
+const HUNT_ID = "hunt-forest";
+const TAG_UID = "tag-oak-01";
+const SCAN_ID = "scan-001";
+const PLACER_UID = "placer-gina";
+const CHARACTER_ID = "char-player-dan";
+
+function huntPath(huntId = HUNT_ID): string {
+  return `${tenantBase(INSTANCE_ID, EVENT_SLUG)}/nfcHunts/${huntId}`;
+}
+
+function huntTagPath(tagUid = TAG_UID): string {
+  return `${huntPath()}/tags/${tagUid}`;
+}
+
+function huntScanPath(scanId = SCAN_ID): string {
+  return `${huntPath()}/scans/${scanId}`;
+}
+
+function huntReviewScanPath(scanId = SCAN_ID): string {
+  return `${huntPath()}/reviewScans/${scanId}`;
+}
+
+function characterNfcHuntScanPath(
+  characterId = CHARACTER_ID,
+  scanId = SCAN_ID
+): string {
+  return `${tenantBase(INSTANCE_ID, EVENT_SLUG)}/characters/${characterId}/nfcHuntScans/${scanId}`;
+}
+
+function huntPayload(
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    enabled: true,
+    name: "Forest Hunt",
+    expectedTagCount: 12,
+    placerUids: [PLACER_UID],
+    ...extra,
+  };
+}
+
+function tagPayload(
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    label: "Oak grove",
+    placement: "floating",
+    registeredByUid: ORGANIZER_UID,
+    registeredAt: new Date(),
+    ...extra,
+  };
+}
+
+function scanPayload(
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    characterId: CHARACTER_ID,
+    ownerUid: PLAYER_UID,
+    tagUid: TAG_UID,
+    scannedAt: new Date(),
+    queuedOffline: false,
+    tenantKey: `${INSTANCE_ID}::${EVENT_SLUG}`,
+    huntId: HUNT_ID,
+    ...extra,
+  };
+}
+
+async function seedHunt(
+  extra: Record<string, unknown> = {}
+): Promise<void> {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().doc(huntPath()).set(huntPayload(extra));
+  });
+}
+
+test("tenant member can read nfcHunts hunt document (Task 002)", async () => {
+  await seedMember(PLAYER_UID);
+  await seedHunt();
+
+  await assertSucceeds(getDoc(doc(authDb(PLAYER_UID), huntPath())));
+});
+
+test("non-member cannot read nfcHunts hunt document (Task 002)", async () => {
+  await seedHunt();
+
+  await assertFails(getDoc(doc(authDb(OUTSIDER_UID), huntPath())));
+});
+
+test("organizer can write nfcHunts hunt document (Task 002)", async () => {
+  await seedMember(ORGANIZER_UID, "owner");
+
+  await assertSucceeds(
+    setDoc(doc(authDb(ORGANIZER_UID), huntPath()), huntPayload())
+  );
+});
+
+test("player cannot write nfcHunts hunt document (Task 002)", async () => {
+  await seedMember(PLAYER_UID);
+
+  await assertFails(
+    setDoc(doc(authDb(PLAYER_UID), huntPath()), huntPayload())
+  );
+});
+
+test("organizer can write nfc hunt tags (Task 002)", async () => {
+  await seedMember(ORGANIZER_UID, "owner");
+  await seedHunt();
+
+  await assertSucceeds(
+    setDoc(doc(authDb(ORGANIZER_UID), huntTagPath()), tagPayload())
+  );
+});
+
+test("placer in hunt.placerUids can write nfc hunt tags (Task 002)", async () => {
+  await seedMember(PLACER_UID);
+  await seedHunt({ placerUids: [PLACER_UID] });
+
+  await assertSucceeds(
+    setDoc(
+      doc(authDb(PLACER_UID), huntTagPath()),
+      tagPayload({ registeredByUid: PLACER_UID })
+    )
+  );
+});
+
+test("non-placer player cannot write nfc hunt tags (Task 002)", async () => {
+  await seedMember(PLAYER_UID);
+  await seedHunt({ placerUids: [PLACER_UID] });
+
+  await assertFails(
+    setDoc(doc(authDb(PLAYER_UID), huntTagPath()), tagPayload())
+  );
+});
+
+test("client cannot create nfc hunt credit scans (Task 002)", async () => {
+  await seedMember(ORGANIZER_UID, "owner");
+  await seedMember(PLAYER_UID);
+  await seedHunt();
+
+  await assertFails(
+    setDoc(doc(authDb(PLAYER_UID), huntScanPath()), scanPayload())
+  );
+  await assertFails(
+    setDoc(doc(authDb(ORGANIZER_UID), huntScanPath()), scanPayload())
+  );
+});
+
+test("client cannot create nfc hunt reviewScans (Task 002)", async () => {
+  await seedMember(ORGANIZER_UID, "owner");
+  await seedHunt();
+
+  await assertFails(
+    setDoc(doc(authDb(ORGANIZER_UID), huntReviewScanPath()), {
+      ...scanPayload(),
+      reason: "unknown_tag",
+    })
+  );
+});
+
+test("client cannot create character nfcHuntScans mirrors (Task 002)", async () => {
+  await seedMember(PLAYER_UID);
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().doc(
+      `${tenantBase(INSTANCE_ID, EVENT_SLUG)}/characters/${CHARACTER_ID}`
+    ).set({
+      ownerId: PLAYER_UID,
+      name: "Alder",
+    });
+  });
+
+  await assertFails(
+    setDoc(
+      doc(authDb(PLAYER_UID), characterNfcHuntScanPath()),
+      scanPayload()
+    )
+  );
+});
+
 // --- Task 006: harness wiring ---
 
 const REPO_ROOT = join(__dirname, "../../..");

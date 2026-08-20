@@ -228,6 +228,14 @@ service cloud.firestore {
               );
             allow write: if false;
           }
+          match /nfcHuntScans/{scanId} {
+            allow read: if isAuthenticated()
+              && isGameMember(instanceId, eventSlug)
+              && isOwner(
+                get(/databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug)/characters/$(characterId)).data.ownerId
+              );
+            allow write: if false;
+          }
         }
 
         match /characterShortIdLookup/{shortId} {
@@ -301,6 +309,34 @@ service cloud.firestore {
         match /larpManagerOrganizers/{organizerId} {
           allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
           allow write: if false;
+        }
+
+        match /nfcHunts/{huntId} {
+          allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+          allow write: if isAuthenticated() && canConfigureGameRules(instanceId, eventSlug);
+
+          function isHuntPlacer() {
+            let huntPath = /databases/$(database)/documents/games/$(instanceId)/events/$(eventSlug)/nfcHunts/$(huntId);
+            return isGameMember(instanceId, eventSlug)
+              && exists(huntPath)
+              && request.auth.uid in get(huntPath).data.placerUids;
+          }
+
+          match /tags/{tagUid} {
+            allow read: if isAuthenticated() && isGameMember(instanceId, eventSlug);
+            allow write: if isAuthenticated()
+              && (canConfigureGameRules(instanceId, eventSlug) || isHuntPlacer());
+          }
+
+          match /scans/{scanId} {
+            allow read: if isAuthenticated() && isStaffOrAbove(instanceId, eventSlug);
+            allow write: if false;
+          }
+
+          match /reviewScans/{scanId} {
+            allow read: if isAuthenticated() && isStaffOrAbove(instanceId, eventSlug);
+            allow write: if false;
+          }
         }
       }
     }
