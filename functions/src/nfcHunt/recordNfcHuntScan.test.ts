@@ -107,6 +107,7 @@ function seedHappyPath(
   });
   stub.store.set(tagPath(TAG_UID), {
     placement: "floating",
+    label: "Oak shrine",
     registeredByUid: "owner-alice",
     registeredAt: ts(SCAN_TIME),
   });
@@ -114,6 +115,14 @@ function seedHappyPath(
     ownerId: UID,
     name: "Alder",
   });
+}
+
+function inboxWrites(
+  stub: ReturnType<typeof makeFirestoreStub>,
+  uid = UID
+): Array<{ path: string; data: Record<string, unknown> }> {
+  const prefix = `users/${uid}/inAppNotifications/`;
+  return stub.writes.filter((w) => w.path.startsWith(prefix));
 }
 
 function happyBody(
@@ -193,7 +202,11 @@ test("duplicate credit for the same character and tag returns already_scanned", 
     callableRequest(happyBody(), UID)
   );
   assert.equal(first.outcome, "credited");
-  const writesAfterFirst = stub.writes.length;
+  const creditWritesAfterFirst = stub.writes.filter(
+    (w) =>
+      w.path.startsWith(`${scansPrefix()}/`) ||
+      w.path.startsWith(`${mirrorPrefix()}/`)
+  ).length;
 
   const second = await runRecordNfcHuntScan(
     depsForStub(stub),
@@ -202,9 +215,14 @@ test("duplicate credit for the same character and tag returns already_scanned", 
 
   assert.equal(second.outcome, "already_scanned");
   assert.equal(creditedScans(stub).length, 1);
+  const creditWritesAfterSecond = stub.writes.filter(
+    (w) =>
+      w.path.startsWith(`${scansPrefix()}/`) ||
+      w.path.startsWith(`${mirrorPrefix()}/`)
+  ).length;
   assert.equal(
-    stub.writes.length,
-    writesAfterFirst,
+    creditWritesAfterSecond,
+    creditWritesAfterFirst,
     "duplicate must not write another credit or mirror"
   );
 });
@@ -299,4 +317,107 @@ test("credits even when eventSession is not live", async () => {
   );
 
   assert.equal(result.outcome, "credited");
+});
+
+test("credited outcome creates nfc_hunt_scan_result inbox notification", async () => {
+  const stub = makeFirestoreStub();
+  seedHappyPath(stub);
+
+  const result = await runRecordNfcHuntScan(
+    depsForStub(stub),
+    callableRequest(happyBody(), UID)
+  );
+
+  assert.equal(result.outcome, "credited");
+  const notes = inboxWrites(stub);
+  assert.equal(notes.length, 1);
+  const note = notes[0]!.data;
+  assert.equal(note.type, "nfc_hunt_scan_result");
+  assert.equal(note.title, "Tag found!");
+  assert.equal(
+    note.body,
+    "Tag found! Credit recorded for Oak shrine."
+  );
+  assert.equal(note.tenantKey, TKEY);
+  assert.equal(note.readAt, null);
+  const payload = note.payload as Record<string, unknown>;
+  assert.equal(payload.outcome, "credited");
+  assert.equal(payload.tagUid, TAG_UID);
+  assert.equal(payload.huntId, HUNT_ID);
+  assert.equal(payload.huntName, "Forest Hunt");
+});
+
+test("already_scanned creates notification without a second credit", async () => {
+  const stub = makeFirestoreStub();
+  seedHappyPath(stub);
+
+  const first = await runRecordNfcHuntScan(
+    depsForStub(stub),
+    callableRequest(happyBody(), UID)
+  );
+  assert.equal(first.outcome, "credited");
+  const notesAfterFirst = inboxWrites(stub).length;
+
+  const second = await runRecordNfcHuntScan(
+    depsForStub(stub),
+    callableRequest(happyBody(), UID)
+  );
+
+  assert.equal(second.outcome, "already_scanned");
+  assert.equal(creditedScans(stub).length, 1);
+  assert.equal(inboxWrites(stub).length, notesAfterFirst + 1);
+
+  const duplicateNote = inboxWrites(stub).at(-1)!.data;
+  assert.equal(duplicateNote.type, "nfc_hunt_scan_result");
+  assert.equal(duplicateNote.body, "You already scanned this tag.");
+  const payload = duplicateNote.payload as Record<string, unknown>;
+  assert.equal(payload.outcome, "already_scanned");
+  assert.equal(payload.tagUid, TAG_UID);
+  assert.equal(payload.huntId, HUNT_ID);
+});
+
+test("unknown_tag creates notification for staff review copy", async () => {
+  const stub = makeFirestoreStub();
+  seedHappyPath(stub);
+
+  const result = await runRecordNfcHuntScan(
+    depsForStub(stub),
+    callableRequest(happyBody({ tagUid: UNKNOWN_TAG_UID }), UID)
+  );
+
+  assert.equal(result.outcome, "unknown_tag");
+  const notes = inboxWrites(stub);
+  assert.equal(notes.length, 1);
+  const note = notes[0]!.data;
+  assert.equal(note.type, "nfc_hunt_scan_result");
+  assert.equal(
+    note.body,
+    "Unknown tag logged for staff review. Take a photo if the tag looks damaged."
+  );
+  const payload = note.payload as Record<string, unknown>;
+  assert.equal(payload.outcome, "unknown_tag");
+  assert.equal(payload.tagUid, UNKNOWN_TAG_UID);
+  assert.equal(payload.huntId, HUNT_ID);
+  assert.equal(payload.huntName, "Forest Hunt");
+});
+
+test("credited notification falls back to tagUid when label is missing", async () => {
+  const stub = makeFirestoreStub();
+  seedHappyPath(stub);
+  stub.store.set(tagPath(TAG_UID), {
+    placement: "floating",
+    registeredByUid: "owner-alice",
+    registeredAt: ts(SCAN_TIME),
+  });
+
+  await runRecordNfcHuntScan(
+    depsForStub(stub),
+    callableRequest(happyBody(), UID)
+  );
+
+  const note = inboxWrites(stub)[0]!.data;
+  assert.equal(
+    note.body,
+    `Tag found! Credit recorded for ${TAG_UID}.`
+  );
 });

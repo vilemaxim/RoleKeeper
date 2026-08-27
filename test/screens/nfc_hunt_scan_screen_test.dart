@@ -6,6 +6,7 @@ import 'package:rolekeeper/constants/game_constants.dart';
 import 'package:rolekeeper/models/activity_event.dart';
 import 'package:rolekeeper/models/nfc_hunt.dart';
 import 'package:rolekeeper/screens/nfc_hunt_scan_screen.dart';
+import 'package:rolekeeper/services/nfc_hunt_offline_queue_service.dart';
 import 'package:rolekeeper/services/nfc_hunt_scan_service.dart';
 
 /// In-memory fake for player scan callables (no Firebase).
@@ -16,6 +17,7 @@ class _FakeNfcHuntScanService extends Fake implements NfcHuntScanService {
   );
   Map<String, dynamic>? lastArgs;
   Object? error;
+  bool nextSavedOffline = false;
 
   @override
   Future<NfcHuntScanResult> recordScan({
@@ -35,6 +37,37 @@ class _FakeNfcHuntScanService extends Fake implements NfcHuntScanService {
       'queuedOffline': queuedOffline,
     };
     return nextResult;
+  }
+
+  @override
+  Future<NfcHuntScanSubmitResult> submitScan({
+    required String huntId,
+    required String characterId,
+    required String tagUid,
+    ActivityEventLocation? location,
+    DateTime? clientScannedAt,
+    String? rawQrPayload,
+    required NfcHuntOfflineQueueService offlineQueue,
+  }) async {
+    if (nextSavedOffline) {
+      lastArgs = {
+        'huntId': huntId,
+        'characterId': characterId,
+        'tagUid': tagUid,
+        'location': location,
+        'queuedOffline': true,
+        'rawQrPayload': rawQrPayload,
+      };
+      return NfcHuntScanSubmitResult.queued();
+    }
+    final result = await recordScan(
+      huntId: huntId,
+      characterId: characterId,
+      tagUid: tagUid,
+      location: location,
+      clientScannedAt: clientScannedAt,
+    );
+    return NfcHuntScanSubmitResult.online(result);
   }
 }
 
