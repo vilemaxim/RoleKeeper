@@ -1,13 +1,17 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models/death_rules.dart';
 import '../models/event_session.dart';
+import '../models/game_role.dart';
 import '../services/event_session_repository.dart';
+import '../services/game_membership_service.dart';
 import '../services/location_tracking_rules_repository.dart';
 import '../services/rules_repository.dart';
 import '../utils/error_reporting.dart';
 import '../utils/relative_time.dart';
 import 'location_tracking_rules_section.dart';
+import 'nfc_hunt_admin_screen.dart';
 
 /// Screen for configuring LARP rules (event session, location tracking, death).
 class RulesScreen extends StatefulWidget {
@@ -97,9 +101,46 @@ class _RulesScreenState extends State<RulesScreen> {
                   locationRulesRepository: _locationRulesRepo,
                 ),
                 const SizedBox(height: 32),
+                _buildScavengerHuntsSection(),
+                const SizedBox(height: 32),
                 _buildDeathSection(),
               ],
             ),
+    );
+  }
+
+  Widget _buildScavengerHuntsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Scavenger hunts', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Manage hunts and tag registration'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _openScavengerHunts,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openScavengerHunts() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    GameRole role = GameRole.owner;
+    try {
+      role = await GameMembershipService().getRoleInGame();
+    } catch (e, st) {
+      reportAppError('RulesScreen.openScavengerHunts', e, st);
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NfcHuntAdminScreen(
+          gameRole: role,
+          currentUid: uid,
+        ),
+      ),
     );
   }
 

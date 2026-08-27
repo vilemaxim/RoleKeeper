@@ -289,5 +289,12 @@ void main() {
       expect(eventSessionY, lessThan(locationTrackingY));
       expect(locationTrackingY, lessThan(deathY));
     });
+
+    testWidgets('includes Scavenger hunts navigation entry', (tester) async {
+      await tester.pumpWidget(wrapRulesScreen());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Scavenger hunts'), findsOneWidget);
+    });
   });
 }
