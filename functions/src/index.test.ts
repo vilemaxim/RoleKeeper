@@ -10,3 +10,16 @@ test("syncOfflineChanges is not exported from index", () => {
     "syncOfflineChanges must not be exported — it allowed arbitrary Admin SDK writes"
   );
 });
+
+test("registerNfcHuntTag and recordNfcHuntScan are exported (Task 002)", () => {
+  assert.equal(
+    "registerNfcHuntTag" in index,
+    true,
+    "registerNfcHuntTag must be exported from functions/src/index.ts"
+  );
+  assert.equal(
+    "recordNfcHuntScan" in index,
+    true,
+    "recordNfcHuntScan must be exported from functions/src/index.ts"
+  );
+});

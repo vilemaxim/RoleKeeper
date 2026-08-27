@@ -35,6 +35,55 @@ abstract final class GameFirestorePaths {
   ) =>
       eventDoc(db, tenant).collection('characters');
 
+  static CollectionReference<Map<String, dynamic>> nfcHunts(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+  ) =>
+      eventDoc(db, tenant).collection('nfcHunts');
+
+  static DocumentReference<Map<String, dynamic>> nfcHunt(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+    String huntId,
+  ) =>
+      nfcHunts(db, tenant).doc(huntId);
+
+  static CollectionReference<Map<String, dynamic>> nfcHuntTags(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+    String huntId,
+  ) =>
+      nfcHunt(db, tenant, huntId).collection('tags');
+
+  static DocumentReference<Map<String, dynamic>> nfcHuntTag(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+    String huntId,
+    String tagUid,
+  ) =>
+      nfcHuntTags(db, tenant, huntId).doc(tagUid);
+
+  static CollectionReference<Map<String, dynamic>> nfcHuntScans(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+    String huntId,
+  ) =>
+      nfcHunt(db, tenant, huntId).collection('scans');
+
+  static CollectionReference<Map<String, dynamic>> nfcHuntReviewScans(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+    String huntId,
+  ) =>
+      nfcHunt(db, tenant, huntId).collection('reviewScans');
+
+  static CollectionReference<Map<String, dynamic>> characterNfcHuntScans(
+    FirebaseFirestore db,
+    GameTenantRef tenant,
+    String characterId,
+  ) =>
+      characters(db, tenant).doc(characterId).collection('nfcHuntScans');
+
   static CollectionReference<Map<String, dynamic>> characterShortIdLookup(
     FirebaseFirestore db,
     GameTenantRef tenant,
