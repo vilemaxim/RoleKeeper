@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/activity_event.dart';
 import '../models/nfc_hunt.dart';
 import '../services/game_context_service.dart';
+import '../services/nfc_hunt_offline_queue_service.dart';
 import '../services/nfc_hunt_scan_service.dart';
 import '../utils/active_events_utils.dart';
 import '../utils/error_reporting.dart';
@@ -22,6 +23,7 @@ class NfcHuntScanScreen extends StatelessWidget {
     required this.hunts,
     this.activeCharacterId,
     this.scanService,
+    this.offlineQueue,
     this.expectedTenantKey,
     this.scanQrCode,
     this.captureLocation,
@@ -30,6 +32,7 @@ class NfcHuntScanScreen extends StatelessWidget {
   final List<NfcHunt> hunts;
   final String? activeCharacterId;
   final NfcHuntScanService? scanService;
+  final NfcHuntOfflineQueueService? offlineQueue;
   final String? expectedTenantKey;
   final ScanQrCodeFn? scanQrCode;
   final CaptureLocationFn? captureLocation;
@@ -101,15 +104,25 @@ class NfcHuntScanScreen extends StatelessWidget {
     if (!context.mounted) return;
 
     final service = scanService ?? NfcHuntScanService();
+    final queue = offlineQueue ?? NfcHuntOfflineQueueService();
     try {
-      final result = await service.recordScan(
+      final submit = await service.submitScan(
         huntId: parsed.huntId,
         characterId: characterId,
         tagUid: parsed.tagUid,
         location: location,
+        clientScannedAt: DateTime.now().toUtc(),
+        rawQrPayload: raw,
+        offlineQueue: queue,
       );
       if (!context.mounted) return;
-      _showOutcome(context, result);
+      if (submit.savedOffline) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(submit.userMessage)),
+        );
+        return;
+      }
+      _showOutcome(context, submit.result!);
     } catch (e, st) {
       if (!context.mounted) return;
       final report = reportAppError('NfcHuntScanScreen.recordScan', e, st);

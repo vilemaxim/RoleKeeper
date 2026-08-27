@@ -39,6 +39,8 @@ import '../services/location_ping_service.dart';
 import '../services/location_tracking_rules_repository.dart';
 import '../services/member_presence_repository.dart';
 import '../services/nfc_hunt_service.dart';
+import '../services/nfc_hunt_offline_queue_service.dart';
+import '../services/nfc_hunt_scan_service.dart';
 import '../services/user_profile_service.dart';
 import '../utils/error_reporting.dart';
 import '../widgets/lm_integration_setup_prompt.dart';
@@ -59,7 +61,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _membershipService = GameMembershipService();
   final _registrationService = LarpManagerRegistrationService();
   final _lmStatusService = LarpManagerIntegrationStatusService();
@@ -70,6 +72,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final _charactersRepo = CharactersRepository();
   final _activeCharacterPrefs = ActiveCharacterPreferenceService();
   final _nfcHuntService = NfcHuntService();
+  final _nfcHuntScanService = NfcHuntScanService();
+  final _nfcHuntOfflineQueue = NfcHuntOfflineQueueService();
   StreamSubscription? _eventSessionSub;
   StreamSubscription? _locationRulesSub;
   StreamSubscription? _charactersSub;
@@ -96,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _eventSessionSub = _eventSessionRepo.watch().listen((session) {
       if (!_lastEventSession.isLive && session.isLive) {
         _locationOptInPromptDismissed = false;
@@ -123,12 +128,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _eventSessionSub?.cancel();
     _locationRulesSub?.cancel();
     _charactersSub?.cancel();
     _nfcHuntsSub?.cancel();
     _locationPingService.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_drainNfcHuntOfflineQueue());
+    }
   }
 
   Future<void> _onOwnedCharactersChanged(List<Character> chars) async {
@@ -249,6 +262,16 @@ class _HomeScreenState extends State<HomeScreen> {
     await _checkDeathTimerOnLogin();
     await _prefetchDeathInterventionSecrets();
     await _syncLocationPings();
+    await _drainNfcHuntOfflineQueue();
+  }
+
+  /// Syncs locally queued hunt scans once connectivity may be available.
+  Future<void> _drainNfcHuntOfflineQueue() async {
+    try {
+      await _nfcHuntScanService.drainOfflineQueue(_nfcHuntOfflineQueue);
+    } catch (e, st) {
+      reportAppError('HomeScreen.drainNfcHuntOfflineQueue', e, st);
+    }
   }
 
   /// Eagerly caches per-event TOTP + QR signing secrets while online so

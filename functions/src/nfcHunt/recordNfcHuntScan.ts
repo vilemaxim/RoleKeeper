@@ -6,6 +6,10 @@ import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { gameEventBase, resolveGameTenantFromBody, tenantKey } from "../gameTenant";
 import { sanitizeLocation } from "../location/locationPayload";
 import {
+  NFC_HUNT_SCAN_RESULT,
+  createInAppNotification,
+} from "../notifications/createInAppNotification";
+import {
   characterNfcHuntScanDoc,
   nfcHuntDoc,
   nfcHuntReviewScanDoc,
@@ -51,7 +55,62 @@ function asTimestamp(raw: unknown): admin.firestore.Timestamp | undefined {
   ) {
     return raw as admin.firestore.Timestamp;
   }
+  if (typeof raw === "string" && raw.trim()) {
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      return admin.firestore.Timestamp.fromDate(d);
+    }
+  }
   return undefined;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+async function notifyScanOutcome(
+  db: admin.firestore.Firestore,
+  args: {
+    uid: string;
+    tenantKey: string;
+    huntId: string;
+    huntName?: string;
+    tagUid: string;
+    tagLabel?: string;
+    outcome: "credited" | "already_scanned" | "unknown_tag";
+  }
+): Promise<void> {
+  const { uid, tenantKey: tKey, huntId, huntName, tagUid, tagLabel, outcome } =
+    args;
+  const copy =
+    outcome === "credited"
+      ? {
+          title: "Tag found!",
+          body: `Tag found! Credit recorded for ${tagLabel?.trim() || tagUid}.`,
+        }
+      : outcome === "already_scanned"
+        ? {
+            title: "Already scanned",
+            body: "You already scanned this tag.",
+          }
+        : {
+            title: "Unknown tag",
+            body:
+              "Unknown tag logged for staff review. Take a photo if the tag looks damaged.",
+          };
+  await createInAppNotification(db, {
+    uid,
+    type: NFC_HUNT_SCAN_RESULT,
+    title: copy.title,
+    body: copy.body,
+    tenantKey: tKey,
+    payload: {
+      outcome,
+      tagUid,
+      huntId,
+      ...(huntName ? { huntName } : {}),
+    },
+  });
 }
 
 export async function runRecordNfcHuntScan(
@@ -101,9 +160,11 @@ export async function runRecordNfcHuntScan(
   if (!huntSnap.exists) {
     throw new HttpsError("not-found", "Hunt not found");
   }
-  if (huntSnap.data()?.enabled !== true) {
+  const huntData = huntSnap.data() ?? {};
+  if (huntData.enabled !== true) {
     throw new HttpsError("failed-precondition", "Hunt is not enabled");
   }
+  const huntName = optionalString(huntData.name);
 
   const characterSnap = await db.doc(`${base}/characters/${characterId}`).get();
   if (!characterSnap.exists) {
@@ -137,8 +198,18 @@ export async function runRecordNfcHuntScan(
       ...payload,
       reason: "unknown_tag",
     });
+    await notifyScanOutcome(db, {
+      uid,
+      tenantKey: tKey,
+      huntId,
+      huntName,
+      tagUid,
+      outcome: "unknown_tag",
+    });
     return { outcome: "unknown_tag" };
   }
+
+  const tagLabel = optionalString(tagSnap.data()?.label);
 
   const existing = await db
     .collection(nfcHuntScansCollection(base, huntId))
@@ -147,6 +218,15 @@ export async function runRecordNfcHuntScan(
     .limit(1)
     .get();
   if (!existing.empty) {
+    await notifyScanOutcome(db, {
+      uid,
+      tenantKey: tKey,
+      huntId,
+      huntName,
+      tagUid,
+      tagLabel,
+      outcome: "already_scanned",
+    });
     return { outcome: "already_scanned" };
   }
 
@@ -157,6 +237,16 @@ export async function runRecordNfcHuntScan(
     payload
   );
   await batch.commit();
+
+  await notifyScanOutcome(db, {
+    uid,
+    tenantKey: tKey,
+    huntId,
+    huntName,
+    tagUid,
+    tagLabel,
+    outcome: "credited",
+  });
 
   return { outcome: "credited", scanId };
 }
