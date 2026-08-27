@@ -13,6 +13,7 @@ import '../screens/home_assistant_integration_screen.dart';
 import '../screens/larp_manager_integration_screen.dart';
 import '../screens/larp_manager_sync_settings_screen.dart';
 import '../screens/larp_picker_screen.dart';
+import '../screens/nfc_hunt_scan_screen.dart';
 import '../screens/player_presence_settings_section.dart';
 import '../screens/rules_aids_screen.dart';
 import '../screens/rules_screen.dart';
@@ -21,6 +22,7 @@ import '../models/death_rules.dart';
 import '../models/event_session.dart';
 import '../models/game_role.dart';
 import '../models/member_presence.dart';
+import '../models/nfc_hunt.dart';
 import '../services/active_character_preference_service.dart';
 import '../services/auth_service.dart';
 import '../services/activity_events_service.dart';
@@ -36,6 +38,7 @@ import '../services/larp_manager_registration_service.dart';
 import '../services/location_ping_service.dart';
 import '../services/location_tracking_rules_repository.dart';
 import '../services/member_presence_repository.dart';
+import '../services/nfc_hunt_service.dart';
 import '../services/user_profile_service.dart';
 import '../utils/error_reporting.dart';
 import '../widgets/lm_integration_setup_prompt.dart';
@@ -66,9 +69,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _presenceRepo = MemberPresenceRepository();
   final _charactersRepo = CharactersRepository();
   final _activeCharacterPrefs = ActiveCharacterPreferenceService();
+  final _nfcHuntService = NfcHuntService();
   StreamSubscription? _eventSessionSub;
   StreamSubscription? _locationRulesSub;
   StreamSubscription? _charactersSub;
+  StreamSubscription? _nfcHuntsSub;
   GameRole _gameRole = GameRole.player;
   LmIntegrationEvaluation? _lmEvaluation;
   bool _bootstrapDone = false;
@@ -86,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
   EventSession _lastEventSession = EventSession.defaultSession;
   List<Character> _ownedCharacters = const [];
   String? _activeCharacterId;
+  List<NfcHunt> _nfcHunts = const [];
 
   @override
   void initState() {
@@ -109,6 +115,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _charactersSub = _charactersRepo.watchCharacters().listen((chars) {
       unawaited(_onOwnedCharactersChanged(chars));
     });
+    _nfcHuntsSub = _nfcHuntService.watchHunts().listen((hunts) {
+      if (mounted) setState(() => _nfcHunts = hunts);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
   }
 
@@ -117,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _eventSessionSub?.cancel();
     _locationRulesSub?.cancel();
     _charactersSub?.cancel();
+    _nfcHuntsSub?.cancel();
     _locationPingService.dispose();
     super.dispose();
   }
@@ -755,6 +765,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
+                if (_nfcHunts.any((h) => h.enabled)) ...[
+                  const SizedBox(height: 12),
+                  // Home entry: Scan hunt tag (gated on enabled hunts + active character).
+                  NfcHuntScanScreen(
+                    hunts: _nfcHunts,
+                    activeCharacterId: _activeCharacterId,
+                  ),
+                ],
                 if (_gameRole.canConfigureDeathRules) ...[
                   const SizedBox(height: 12),
                   SizedBox(

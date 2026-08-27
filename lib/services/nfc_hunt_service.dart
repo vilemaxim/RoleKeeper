@@ -36,6 +36,17 @@ class NfcHuntService {
         .toList(growable: false);
   }
 
+  /// Live hunt list for the current tenant (player scan entry gating).
+  Stream<List<NfcHunt>> watchHunts() {
+    return GameFirestorePaths.nfcHunts(_firestore, _resolvedTenant)
+        .snapshots()
+        .map(
+          (snap) => snap.docs
+              .map((d) => NfcHunt.fromMap(d.id, d.data()))
+              .toList(growable: false),
+        );
+  }
+
   Future<NfcHunt> createHunt({
     required String name,
     required int expectedTagCount,
