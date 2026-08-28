@@ -4,6 +4,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import '../models/activity_event.dart';
 import '../models/game_tenant_ref.dart';
 import '../models/nfc_hunt.dart';
+import '../models/nfc_hunt_scan.dart';
 import '../models/nfc_hunt_tag.dart';
 import '../utils/game_firestore_paths.dart';
 import 'game_context_service.dart';
@@ -98,6 +99,28 @@ class NfcHuntService {
     ).get();
     return snap.docs
         .map((d) => NfcHuntTag.fromMap(d.id, d.data()))
+        .toList(growable: false);
+  }
+
+  Future<List<NfcHuntScan>> listScans(String huntId) async {
+    final snap = await GameFirestorePaths.nfcHuntScans(
+      _firestore,
+      _resolvedTenant,
+      huntId,
+    ).get();
+    return snap.docs
+        .map((d) => NfcHuntScan.fromMap(d.id, d.data()))
+        .toList(growable: false);
+  }
+
+  Future<List<NfcHuntScan>> listReviewScans(String huntId) async {
+    final snap = await GameFirestorePaths.nfcHuntReviewScans(
+      _firestore,
+      _resolvedTenant,
+      huntId,
+    ).get();
+    return snap.docs
+        .map((d) => NfcHuntScan.fromMap(d.id, d.data()))
         .toList(growable: false);
   }
 

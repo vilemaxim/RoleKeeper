@@ -6,6 +6,7 @@ import '../services/game_context_service.dart';
 import '../services/nfc_hunt_service.dart';
 import '../utils/error_reporting.dart';
 import 'nfc_hunt_tag_register_screen.dart';
+import 'nfc_hunt_reports_screen.dart';
 
 /// Organizer hunt management + placer/organizer entry to tag registration.
 class NfcHuntAdminScreen extends StatefulWidget {
@@ -196,6 +197,20 @@ class _NfcHuntAdminScreenState extends State<NfcHuntAdminScreen> {
     );
   }
 
+  void _openReports(NfcHunt hunt) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NfcHuntReportsScreen(
+          gameRole: widget.gameRole,
+          hunt: hunt,
+          huntService: _service,
+        ),
+      ),
+    );
+  }
+
+  bool get _canViewReports => widget.gameRole.canConfigureStaffIntegrations;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -266,6 +281,11 @@ class _NfcHuntAdminScreenState extends State<NfcHuntAdminScreen> {
                               TextButton(
                                 onPressed: () => _openRegister(hunt),
                                 child: const Text('Register tags'),
+                              ),
+                            if (_canViewReports)
+                              TextButton(
+                                onPressed: () => _openReports(hunt),
+                                child: const Text('View reports'),
                               ),
                           ],
                         ),
