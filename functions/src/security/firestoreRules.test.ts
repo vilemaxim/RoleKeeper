@@ -575,6 +575,75 @@ test("client cannot create character nfcHuntScans mirrors (Task 002)", async () 
   );
 });
 
+async function seedScan(
+  extra: Record<string, unknown> = {}
+): Promise<void> {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().doc(huntScanPath()).set(scanPayload(extra));
+  });
+}
+
+async function seedReviewScan(
+  extra: Record<string, unknown> = {}
+): Promise<void> {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx
+      .firestore()
+      .doc(huntReviewScanPath())
+      .set({ ...scanPayload(), reason: "unknown_tag", ...extra });
+  });
+}
+
+test("staff can read nfc hunt credit scans (Task 006)", async () => {
+  await seedMember(STAFF_UID, "staff");
+  await seedHunt();
+  await seedScan();
+
+  await assertSucceeds(getDoc(doc(authDb(STAFF_UID), huntScanPath())));
+});
+
+test("organizer can read nfc hunt credit scans (Task 006)", async () => {
+  await seedMember(ORGANIZER_UID, "owner");
+  await seedHunt();
+  await seedScan();
+
+  await assertSucceeds(getDoc(doc(authDb(ORGANIZER_UID), huntScanPath())));
+});
+
+test("player cannot read hunt-wide nfc hunt credit scans (Task 006)", async () => {
+  await seedMember(PLAYER_UID);
+  await seedHunt();
+  await seedScan();
+
+  await assertFails(getDoc(doc(authDb(PLAYER_UID), huntScanPath())));
+});
+
+test("staff can read nfc hunt reviewScans (Task 006)", async () => {
+  await seedMember(STAFF_UID, "staff");
+  await seedHunt();
+  await seedReviewScan();
+
+  await assertSucceeds(getDoc(doc(authDb(STAFF_UID), huntReviewScanPath())));
+});
+
+test("organizer can read nfc hunt reviewScans (Task 006)", async () => {
+  await seedMember(ORGANIZER_UID, "owner");
+  await seedHunt();
+  await seedReviewScan();
+
+  await assertSucceeds(
+    getDoc(doc(authDb(ORGANIZER_UID), huntReviewScanPath()))
+  );
+});
+
+test("player cannot read hunt-wide nfc hunt reviewScans (Task 006)", async () => {
+  await seedMember(PLAYER_UID);
+  await seedHunt();
+  await seedReviewScan();
+
+  await assertFails(getDoc(doc(authDb(PLAYER_UID), huntReviewScanPath())));
+});
+
 // --- Task 006: harness wiring ---
 
 const REPO_ROOT = join(__dirname, "../../..");
